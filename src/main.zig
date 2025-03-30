@@ -21,6 +21,112 @@ const CharacterClass = struct {
     avatar: ray.Texture2D,
 };
 
+const Vector2 = struct {
+    x: f32,
+    y: f32,
+
+    pub fn add(self: Vector2, other: Vector2) Vector2 {
+        return .{ .x = self.x + other.x, .y = self.y + other.y };
+    }
+
+    pub fn sub(self: Vector2, other: Vector2) Vector2 {
+        return .{ .x = self.x - other.x, .y = self.y - other.y };
+    }
+
+    pub fn scale(self: Vector2, factor: f32) Vector2 {
+        return .{ .x = self.x * factor, .y = self.y * factor };
+    }
+
+    pub fn length(self: Vector2) f32 {
+        return @sqrt(self.x * self.x + self.y * self.y);
+    }
+
+    pub fn normalize(self: Vector2) Vector2 {
+        const len = self.length();
+        if (len == 0) return .{ .x = 0, .y = 0 };
+        return self.scale(1.0 / len);
+    }
+
+    pub fn toRaylib(self: Vector2) ray.Vector2 {
+        return .{ .x = self.x, .y = self.y };
+    }
+
+    pub fn fromRaylib(v: ray.Vector2) Vector2 {
+        return .{ .x = v.x, .y = v.y };
+    }
+};
+
+const CharacterType = enum {
+    Warrior,
+    Scout,
+    Guardian,
+};
+
+const Player = struct {
+    position: Vector2,
+    velocity: Vector2,
+    direction: Vector2,
+    health: f32,
+    max_health: f32,
+    attack_damage: f32,
+    attack_range: f32,
+    attack_speed: f32,
+    attack_timer: f32,
+    character_type: CharacterType,
+    level: i32,
+    experience: f32,
+    gold: i32,
+    energy: f32,
+};
+
+const EnemyType = enum {
+    Melee,
+    Ranged,
+    Charger,
+};
+
+const Enemy = struct {
+    position: Vector2,
+    velocity: Vector2,
+    health: f32,
+    max_health: f32,
+    damage: f32,
+    attack_range: f32,
+    attack_speed: f32,
+    attack_timer: f32,
+    enemy_type: EnemyType,
+    charge_direction: Vector2,
+    charge_energy: f32,
+    is_charging: bool,
+};
+
+const Projectile = struct {
+    position: Vector2,
+    velocity: Vector2,
+    damage: f32,
+    range: f32,
+    distance_traveled: f32,
+};
+
+const Loot = struct {
+    position: Vector2,
+    experience: f32,
+    gold: i32,
+    energy: f32,
+    pickup_radius: f32,
+};
+
+const GameWorld = struct {
+    player: Player,
+    enemies: std.ArrayList(Enemy),
+    projectiles: std.ArrayList(Projectile),
+    loot: std.ArrayList(Loot),
+    spawn_timer: f32,
+    spawn_interval: f32,
+    difficulty: f32,
+    camera: ray.Camera2D,
+};
+
 const GameState = struct {
     screen_width: i32,
     screen_height: i32,
@@ -45,6 +151,7 @@ const GameState = struct {
     title_music: ray.Music,
     show_help: bool,
     title_background: ray.Texture2D,
+    game_world: ?*GameWorld,
 };
 
 fn cleanupGameState(game_state: *GameState) void {
@@ -205,6 +312,7 @@ fn initGameState() GameState {
         .title_music = title_music,
         .show_help = false,
         .title_background = undefined,
+        .game_world = null,
     };
 }
 
@@ -275,6 +383,21 @@ fn updateCharacterSelect(game_state: *GameState) void {
     }
     if (ray.IsKeyPressed(ray.KEY_ENTER) or ray.IsKeyPressed(ray.KEY_SPACE)) {
         ray.StopMusicStream(game_state.character_select_music);
+
+        // Initialize game world with selected character
+        var character_type: CharacterType = undefined;
+        switch (game_state.character_cursor) {
+            0 => character_type = .Warrior,
+            1 => character_type = .Scout,
+            2 => character_type = .Guardian,
+            else => unreachable,
+        }
+
+        game_state.game_world = initGameWorld(std.heap.page_allocator, character_type) catch {
+            std.debug.print("Failed to initialize game world\n", .{});
+            return;
+        };
+
         game_state.current_state = .Playing;
     }
     if (ray.IsKeyPressed(ray.KEY_ESCAPE)) {
@@ -422,18 +545,332 @@ fn drawCharacterSelect(game_state: *GameState) void {
 }
 
 fn updateGame(game_state: *GameState) void {
-    if (ray.IsKeyPressed(ray.KEY_ESCAPE)) {
+    if (game_state.game_world == null) return;
+    const world = game_state.game_world.?;
+
+    // Check for game over or menu return
+    if (world.player.health <= 0 or ray.IsKeyPressed(ray.KEY_ESCAPE)) {
+        // Clean up game world
+        cleanupGameWorld(std.heap.page_allocator, world);
+        game_state.game_world = null;
+
+        // Return to menu
         game_state.current_state = .Menu;
+        ray.PlayMusicStream(game_state.title_music);
+        return;
+    }
+
+    // Update player movement
+    const move_speed = 200.0;
+    var move_dir = Vector2{ .x = 0, .y = 0 };
+
+    if (ray.IsKeyDown(ray.KEY_W)) move_dir.y -= 1;
+    if (ray.IsKeyDown(ray.KEY_S)) move_dir.y += 1;
+    if (ray.IsKeyDown(ray.KEY_A)) move_dir.x -= 1;
+    if (ray.IsKeyDown(ray.KEY_D)) move_dir.x += 1;
+
+    if (move_dir.length() > 0) {
+        move_dir = move_dir.normalize();
+        world.player.velocity = move_dir.scale(move_speed);
+        world.player.direction = move_dir;
+    } else {
+        world.player.velocity = .{ .x = 0, .y = 0 };
+    }
+
+    // Update player position
+    const delta_time = ray.GetFrameTime();
+    world.player.position = world.player.position.add(world.player.velocity.scale(delta_time));
+
+    // Update camera to follow player
+    world.camera.target = world.player.position.toRaylib();
+
+    // Update player attack
+    world.player.attack_timer -= delta_time;
+    if (world.player.attack_timer <= 0) {
+        world.player.attack_timer = 1.0 / world.player.attack_speed;
+
+        // Perform attack based on character type
+        switch (world.player.character_type) {
+            .Warrior => {
+                // Melee attack
+                for (world.enemies.items) |*enemy| {
+                    const dist = enemy.position.sub(world.player.position).length();
+                    if (dist <= world.player.attack_range) {
+                        enemy.health -= world.player.attack_damage;
+                        if (enemy.health <= 0) {
+                            // Spawn loot
+                            world.loot.append(.{
+                                .position = enemy.position,
+                                .experience = 10.0 * world.difficulty,
+                                .gold = @intFromFloat(5.0 * world.difficulty),
+                                .energy = 5.0 * world.difficulty,
+                                .pickup_radius = 50,
+                            }) catch {};
+                        }
+                    }
+                }
+            },
+            .Scout => {
+                // Ranged attack
+                world.projectiles.append(.{
+                    .position = world.player.position,
+                    .velocity = world.player.direction.scale(400),
+                    .damage = world.player.attack_damage,
+                    .range = world.player.attack_range,
+                    .distance_traveled = 0,
+                }) catch {};
+            },
+            .Guardian => {
+                // Balanced attack
+                for (world.enemies.items) |*enemy| {
+                    const dist = enemy.position.sub(world.player.position).length();
+                    if (dist <= world.player.attack_range) {
+                        enemy.health -= world.player.attack_damage;
+                        if (enemy.health <= 0) {
+                            world.loot.append(.{
+                                .position = enemy.position,
+                                .experience = 10.0 * world.difficulty,
+                                .gold = @intFromFloat(5.0 * world.difficulty),
+                                .energy = 5.0 * world.difficulty,
+                                .pickup_radius = 50,
+                            }) catch {};
+                        }
+                    }
+                }
+            },
+        }
+    }
+
+    // Update projectiles
+    var i: usize = 0;
+    while (i < world.projectiles.items.len) {
+        const proj = &world.projectiles.items[i];
+        proj.position = proj.position.add(proj.velocity.scale(delta_time));
+        proj.distance_traveled += proj.velocity.length() * delta_time;
+
+        // Check for hits
+        var j: usize = 0;
+        while (j < world.enemies.items.len) {
+            const enemy = &world.enemies.items[j];
+            const dist = enemy.position.sub(proj.position).length();
+            if (dist < 20) {
+                enemy.health -= proj.damage;
+                if (enemy.health <= 0) {
+                    world.loot.append(.{
+                        .position = enemy.position,
+                        .experience = 10.0 * world.difficulty,
+                        .gold = @intFromFloat(5.0 * world.difficulty),
+                        .energy = 5.0 * world.difficulty,
+                        .pickup_radius = 50,
+                    }) catch {};
+                }
+                _ = world.projectiles.swapRemove(i);
+                break;
+            }
+            j += 1;
+        }
+
+        // Remove projectiles that have traveled their range
+        if (proj.distance_traveled >= proj.range) {
+            _ = world.projectiles.swapRemove(i);
+        } else {
+            i += 1;
+        }
+    }
+
+    // Update enemies
+    i = 0;
+    while (i < world.enemies.items.len) {
+        const enemy = &world.enemies.items[i];
+
+        // Update enemy position
+        const dir_to_player = world.player.position.sub(enemy.position).normalize();
+        enemy.velocity = dir_to_player.scale(100.0);
+        enemy.position = enemy.position.add(enemy.velocity.scale(delta_time));
+
+        // Update enemy attack
+        enemy.attack_timer -= delta_time;
+        if (enemy.attack_timer <= 0) {
+            enemy.attack_timer = 1.0 / enemy.attack_speed;
+
+            switch (enemy.enemy_type) {
+                .Melee => {
+                    const dist = enemy.position.sub(world.player.position).length();
+                    if (dist <= enemy.attack_range) {
+                        world.player.health -= enemy.damage;
+                    }
+                },
+                .Ranged => {
+                    world.projectiles.append(.{
+                        .position = enemy.position,
+                        .velocity = dir_to_player.scale(300),
+                        .damage = enemy.damage,
+                        .range = enemy.attack_range,
+                        .distance_traveled = 0,
+                    }) catch {};
+                },
+                .Charger => {
+                    if (!enemy.is_charging) {
+                        enemy.charge_energy += delta_time;
+                        if (enemy.charge_energy >= 2.0) {
+                            enemy.is_charging = true;
+                            enemy.charge_direction = dir_to_player;
+                            enemy.charge_energy = 0;
+                        }
+                    } else {
+                        enemy.velocity = enemy.charge_direction.scale(300.0);
+                        enemy.position = enemy.position.add(enemy.velocity.scale(delta_time));
+                        const dist = enemy.position.sub(world.player.position).length();
+                        if (dist < 20) {
+                            world.player.health -= enemy.damage * 2;
+                            enemy.is_charging = false;
+                        }
+                    }
+                },
+            }
+        }
+
+        // Remove dead enemies
+        if (enemy.health <= 0) {
+            _ = world.enemies.swapRemove(i);
+        } else {
+            i += 1;
+        }
+    }
+
+    // Update loot collection
+    i = 0;
+    while (i < world.loot.items.len) {
+        const loot = &world.loot.items[i];
+        const dist = loot.position.sub(world.player.position).length();
+        if (dist <= loot.pickup_radius) {
+            world.player.experience += loot.experience;
+            world.player.gold += loot.gold;
+            world.player.energy += loot.energy;
+            _ = world.loot.swapRemove(i);
+        } else {
+            i += 1;
+        }
+    }
+
+    // Spawn new enemies
+    world.spawn_timer -= delta_time;
+    if (world.spawn_timer <= 0) {
+        world.spawn_timer = world.spawn_interval;
+
+        // Spawn position away from player
+        const spawn_dist = 400.0;
+        const angle = @as(f32, @floatFromInt(world.enemies.items.len)) * 2.0 * std.math.pi / 3.0;
+        const spawn_pos = Vector2{
+            .x = world.player.position.x + @cos(angle) * spawn_dist,
+            .y = world.player.position.y + @sin(angle) * spawn_dist,
+        };
+
+        // Random enemy type
+        const enemy_type = @as(EnemyType, @enumFromInt(world.enemies.items.len % 3));
+        const enemy = switch (enemy_type) {
+            .Melee => Enemy{
+                .position = spawn_pos,
+                .velocity = .{ .x = 0, .y = 0 },
+                .health = 50 * world.difficulty,
+                .max_health = 50 * world.difficulty,
+                .damage = 10 * world.difficulty,
+                .attack_range = 40,
+                .attack_speed = 1.0,
+                .attack_timer = 0,
+                .enemy_type = .Melee,
+                .charge_direction = .{ .x = 0, .y = 0 },
+                .charge_energy = 0,
+                .is_charging = false,
+            },
+            .Ranged => Enemy{
+                .position = spawn_pos,
+                .velocity = .{ .x = 0, .y = 0 },
+                .health = 30 * world.difficulty,
+                .max_health = 30 * world.difficulty,
+                .damage = 8 * world.difficulty,
+                .attack_range = 200,
+                .attack_speed = 1.5,
+                .attack_timer = 0,
+                .enemy_type = .Ranged,
+                .charge_direction = .{ .x = 0, .y = 0 },
+                .charge_energy = 0,
+                .is_charging = false,
+            },
+            .Charger => Enemy{
+                .position = spawn_pos,
+                .velocity = .{ .x = 0, .y = 0 },
+                .health = 70 * world.difficulty,
+                .max_health = 70 * world.difficulty,
+                .damage = 15 * world.difficulty,
+                .attack_range = 100,
+                .attack_speed = 0.5,
+                .attack_timer = 0,
+                .enemy_type = .Charger,
+                .charge_direction = .{ .x = 0, .y = 0 },
+                .charge_energy = 0,
+                .is_charging = false,
+            },
+        };
+
+        world.enemies.append(enemy) catch {};
     }
 }
 
 fn drawGame(game_state: *GameState) void {
-    // Draw placeholder game screen
-    const text = "Game in progress...";
-    const text_width = ray.MeasureText(text, game_state.font_size);
-    const text_x = @divTrunc(game_state.screen_width - text_width, 2);
-    const text_y = @divTrunc(game_state.screen_height - game_state.font_size, 2);
-    ray.DrawText(text, text_x, text_y, game_state.font_size, ray.WHITE);
+    if (game_state.game_world == null) return;
+    const world = game_state.game_world.?;
+
+    // Begin camera mode
+    ray.BeginMode2D(world.camera);
+
+    // Draw player
+    ray.DrawCircleV(world.player.position.toRaylib(), 20, ray.BLUE);
+
+    // Draw player direction indicator
+    const dir_indicator = world.player.position.add(world.player.direction.scale(30));
+    ray.DrawLineV(world.player.position.toRaylib(), dir_indicator.toRaylib(), ray.WHITE);
+
+    // Draw enemies
+    for (world.enemies.items) |enemy| {
+        const color = switch (enemy.enemy_type) {
+            .Melee => ray.RED,
+            .Ranged => ray.GREEN,
+            .Charger => ray.YELLOW,
+        };
+
+        ray.DrawCircleV(enemy.position.toRaylib(), 15, color);
+
+        // Draw health bar
+        const health_percent = enemy.health / enemy.max_health;
+        ray.DrawRectangleV(enemy.position.sub(.{ .x = 20, .y = 25 }).toRaylib(), .{ .x = 40, .y = 5 }, ray.RED);
+        ray.DrawRectangleV(enemy.position.sub(.{ .x = 20, .y = 25 }).toRaylib(), .{ .x = 40 * health_percent, .y = 5 }, ray.GREEN);
+
+        // Draw charge indicator for charger enemies
+        if (enemy.enemy_type == .Charger and enemy.is_charging) {
+            ray.DrawLineV(enemy.position.toRaylib(), enemy.position.add(enemy.charge_direction.scale(50)).toRaylib(), ray.YELLOW);
+        }
+    }
+
+    // Draw projectiles
+    for (world.projectiles.items) |proj| {
+        ray.DrawCircleV(proj.position.toRaylib(), 5, ray.WHITE);
+    }
+
+    // Draw loot
+    for (world.loot.items) |loot| {
+        ray.DrawCircleV(loot.position.toRaylib(), 10, ray.GOLD);
+    }
+
+    ray.EndMode2D();
+
+    // Draw UI elements (not affected by camera)
+    const ui_y = 10;
+    ray.DrawText(ray.TextFormat("Health: %.1f/%.1f", world.player.health, world.player.max_health), 10, ui_y, 20, ray.WHITE);
+    ray.DrawText(ray.TextFormat("Level: %d", world.player.level), 10, ui_y + 25, 20, ray.WHITE);
+    ray.DrawText(ray.TextFormat("Experience: %.1f", world.player.experience), 10, ui_y + 50, 20, ray.WHITE);
+    ray.DrawText(ray.TextFormat("Gold: %d", world.player.gold), 10, ui_y + 75, 20, ray.WHITE);
+    ray.DrawText(ray.TextFormat("Energy: %.1f", world.player.energy), 10, ui_y + 100, 20, ray.WHITE);
 }
 
 fn drawHelpIcon(game_state: *GameState) void {
@@ -539,4 +976,86 @@ fn updateHelp(game_state: *GameState) void {
     if (game_state.show_help and ray.IsKeyPressed(ray.KEY_ESCAPE)) {
         game_state.show_help = false;
     }
+}
+
+fn initGameWorld(allocator: std.mem.Allocator, character_type: CharacterType) !*GameWorld {
+    const game_world = try allocator.create(GameWorld);
+    errdefer allocator.destroy(game_world);
+
+    // Initialize player based on character type
+    const player = switch (character_type) {
+        .Warrior => Player{
+            .position = .{ .x = 0, .y = 0 },
+            .velocity = .{ .x = 0, .y = 0 },
+            .direction = .{ .x = 1, .y = 0 },
+            .health = 100,
+            .max_health = 100,
+            .attack_damage = 20,
+            .attack_range = 50,
+            .attack_speed = 1.0,
+            .attack_timer = 0,
+            .character_type = .Warrior,
+            .level = 1,
+            .experience = 0,
+            .gold = 0,
+            .energy = 0,
+        },
+        .Scout => Player{
+            .position = .{ .x = 0, .y = 0 },
+            .velocity = .{ .x = 0, .y = 0 },
+            .direction = .{ .x = 1, .y = 0 },
+            .health = 80,
+            .max_health = 80,
+            .attack_damage = 15,
+            .attack_range = 200,
+            .attack_speed = 1.5,
+            .attack_timer = 0,
+            .character_type = .Scout,
+            .level = 1,
+            .experience = 0,
+            .gold = 0,
+            .energy = 0,
+        },
+        .Guardian => Player{
+            .position = .{ .x = 0, .y = 0 },
+            .velocity = .{ .x = 0, .y = 0 },
+            .direction = .{ .x = 1, .y = 0 },
+            .health = 120,
+            .max_health = 120,
+            .attack_damage = 12,
+            .attack_range = 75,
+            .attack_speed = 1.2,
+            .attack_timer = 0,
+            .character_type = .Guardian,
+            .level = 1,
+            .experience = 0,
+            .gold = 0,
+            .energy = 0,
+        },
+    };
+
+    game_world.* = .{
+        .player = player,
+        .enemies = std.ArrayList(Enemy).init(allocator),
+        .projectiles = std.ArrayList(Projectile).init(allocator),
+        .loot = std.ArrayList(Loot).init(allocator),
+        .spawn_timer = 0,
+        .spawn_interval = 2.0,
+        .difficulty = 1.0,
+        .camera = ray.Camera2D{
+            .offset = .{ .x = 400, .y = 225 },
+            .target = player.position.toRaylib(),
+            .rotation = 0,
+            .zoom = 1,
+        },
+    };
+
+    return game_world;
+}
+
+fn cleanupGameWorld(allocator: std.mem.Allocator, game_world: *GameWorld) void {
+    game_world.enemies.deinit();
+    game_world.projectiles.deinit();
+    game_world.loot.deinit();
+    allocator.destroy(game_world);
 }
