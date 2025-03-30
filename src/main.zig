@@ -40,6 +40,8 @@ const GameState = struct {
     story_texts: [3][:0]const u8,
     character_cursor: i32,
     character_classes: [3]CharacterClass,
+    story_music: ray.Music,
+    character_select_music: ray.Music,
 };
 
 fn cleanupGameState(game_state: *GameState) void {
@@ -52,11 +54,19 @@ fn cleanupGameState(game_state: *GameState) void {
     for (game_state.character_classes) |character| {
         ray.UnloadTexture(character.avatar);
     }
+
+    // Unload music
+    ray.UnloadMusicStream(game_state.story_music);
+    ray.UnloadMusicStream(game_state.character_select_music);
 }
 
 pub fn main() !void {
     ray.InitWindow(800, 450, "Ancient Powers");
     defer ray.CloseWindow();
+
+    // Initialize audio system
+    ray.InitAudioDevice();
+    defer ray.CloseAudioDevice();
 
     ray.SetTargetFPS(60);
 
@@ -96,6 +106,10 @@ pub fn main() !void {
 }
 
 fn initGameState() GameState {
+    // Load music
+    const story_music = ray.LoadMusicStream("assets/music/Music1.mp3");
+    const character_select_music = ray.LoadMusicStream("assets/music/Music2.mp3");
+
     return .{
         .screen_width = 800,
         .screen_height = 450,
@@ -148,6 +162,8 @@ fn initGameState() GameState {
                 .avatar = undefined,
             },
         },
+        .story_music = story_music,
+        .character_select_music = character_select_music,
     };
 }
 
@@ -170,6 +186,7 @@ fn updateMenu(game_state: *GameState) void {
                 game_state.current_state = .Story;
                 game_state.story_panel = 0;
                 game_state.story_transition = 0.0;
+                ray.PlayMusicStream(game_state.story_music);
             },
             .Quit => {
                 ray.CloseWindow();
@@ -179,15 +196,22 @@ fn updateMenu(game_state: *GameState) void {
 }
 
 fn updateStory(game_state: *GameState) void {
+    // Update music
+    ray.UpdateMusicStream(game_state.story_music);
+
     if (ray.IsKeyPressed(ray.KEY_SPACE) or ray.IsKeyPressed(ray.KEY_ENTER)) {
         if (game_state.story_panel < 2) {
             game_state.story_panel += 1;
             game_state.story_transition = 0.0;
         } else {
+            ray.StopMusicStream(game_state.story_music);
+            ray.PlayMusicStream(game_state.character_select_music);
             game_state.current_state = .AvatarSelection;
         }
     }
     if (ray.IsKeyPressed(ray.KEY_ESCAPE)) {
+        ray.StopMusicStream(game_state.story_music);
+        ray.PlayMusicStream(game_state.character_select_music);
         game_state.current_state = .AvatarSelection;
     }
 
@@ -198,6 +222,9 @@ fn updateStory(game_state: *GameState) void {
 }
 
 fn updateCharacterSelect(game_state: *GameState) void {
+    // Update music
+    ray.UpdateMusicStream(game_state.character_select_music);
+
     if (ray.IsKeyPressed(ray.KEY_LEFT)) {
         game_state.character_cursor = if (game_state.character_cursor == 0) 2 else game_state.character_cursor - 1;
     }
@@ -205,9 +232,12 @@ fn updateCharacterSelect(game_state: *GameState) void {
         game_state.character_cursor = if (game_state.character_cursor == 2) 0 else game_state.character_cursor + 1;
     }
     if (ray.IsKeyPressed(ray.KEY_ENTER) or ray.IsKeyPressed(ray.KEY_SPACE)) {
+        ray.StopMusicStream(game_state.character_select_music);
         game_state.current_state = .Playing;
     }
     if (ray.IsKeyPressed(ray.KEY_ESCAPE)) {
+        ray.StopMusicStream(game_state.character_select_music);
+        ray.PlayMusicStream(game_state.story_music);
         game_state.current_state = .Story;
     }
 }
