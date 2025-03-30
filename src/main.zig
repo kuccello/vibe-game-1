@@ -42,6 +42,9 @@ const GameState = struct {
     character_classes: [3]CharacterClass,
     story_music: ray.Music,
     character_select_music: ray.Music,
+    title_music: ray.Music,
+    show_help: bool,
+    title_background: ray.Texture2D,
 };
 
 fn cleanupGameState(game_state: *GameState) void {
@@ -58,6 +61,10 @@ fn cleanupGameState(game_state: *GameState) void {
     // Unload music
     ray.UnloadMusicStream(game_state.story_music);
     ray.UnloadMusicStream(game_state.character_select_music);
+    ray.UnloadMusicStream(game_state.title_music);
+
+    // Unload title background
+    ray.UnloadTexture(game_state.title_background);
 }
 
 pub fn main() !void {
@@ -83,25 +90,55 @@ pub fn main() !void {
     game_state.character_classes[1].avatar = ray.LoadTexture("assets/avatars/avatar_speed_0.png");
     game_state.character_classes[2].avatar = ray.LoadTexture("assets/avatars/avatar_balanced_0.png");
 
+    // Load title background
+    game_state.title_background = ray.LoadTexture("assets/title/title1.png");
+    if (game_state.title_background.id == 0) {
+        std.debug.print("Warning: Could not load title background image. Please ensure 'assets/title/title1.png' exists.\n", .{});
+    } else {
+        std.debug.print("Successfully loaded title background image.\n", .{});
+    }
+
+    // Start title music
+    ray.PlayMusicStream(game_state.title_music);
+
     while (!ray.WindowShouldClose()) {
+        updateHelp(&game_state);
+
+        // Update music based on current state
+        switch (game_state.current_state) {
+            .Menu => ray.UpdateMusicStream(game_state.title_music),
+            .Story => ray.UpdateMusicStream(game_state.story_music),
+            .AvatarSelection => ray.UpdateMusicStream(game_state.character_select_music),
+            .Playing => {},
+        }
+
+        ray.BeginDrawing();
+        defer ray.EndDrawing();
+
+        ray.ClearBackground(ray.BLACK);
+
         switch (game_state.current_state) {
             .Menu => {
-                updateMenu(&game_state);
+                if (!game_state.show_help) updateMenu(&game_state);
                 drawMenu(&game_state);
             },
             .Story => {
-                updateStory(&game_state);
+                if (!game_state.show_help) updateStory(&game_state);
                 drawStory(&game_state);
             },
             .AvatarSelection => {
-                updateCharacterSelect(&game_state);
+                if (!game_state.show_help) updateCharacterSelect(&game_state);
                 drawCharacterSelect(&game_state);
             },
             .Playing => {
-                updateGame(&game_state);
+                if (!game_state.show_help) updateGame(&game_state);
                 drawGame(&game_state);
             },
         }
+
+        // Draw help icon and overlay
+        drawHelpIcon(&game_state);
+        drawHelpOverlay(&game_state);
     }
 }
 
@@ -109,6 +146,7 @@ fn initGameState() GameState {
     // Load music
     const story_music = ray.LoadMusicStream("assets/music/Music1.mp3");
     const character_select_music = ray.LoadMusicStream("assets/music/Music2.mp3");
+    const title_music = ray.LoadMusicStream("assets/music/TitleScreen.mp3");
 
     return .{
         .screen_width = 800,
@@ -164,6 +202,9 @@ fn initGameState() GameState {
         },
         .story_music = story_music,
         .character_select_music = character_select_music,
+        .title_music = title_music,
+        .show_help = false,
+        .title_background = undefined,
     };
 }
 
@@ -183,6 +224,7 @@ fn updateMenu(game_state: *GameState) void {
     if (ray.IsKeyPressed(ray.KEY_ENTER) or ray.IsKeyPressed(ray.KEY_SPACE)) {
         switch (game_state.selected_option) {
             .StartGame => {
+                ray.StopMusicStream(game_state.title_music);
                 game_state.current_state = .Story;
                 game_state.story_panel = 0;
                 game_state.story_transition = 0.0;
@@ -243,16 +285,13 @@ fn updateCharacterSelect(game_state: *GameState) void {
 }
 
 fn drawMenu(game_state: *GameState) void {
-    ray.BeginDrawing();
-    defer ray.EndDrawing();
-
-    ray.ClearBackground(ray.BLACK);
-
-    // Draw title
-    const title = "Ancient Powers";
-    const title_width = ray.MeasureText(title, game_state.title_font_size);
-    const title_x = @divTrunc(game_state.screen_width - title_width, 2);
-    ray.DrawText(title, title_x, 100, game_state.title_font_size, ray.WHITE);
+    // Draw title background if available
+    if (game_state.title_background.id != 0) {
+        ray.DrawTexture(game_state.title_background, 0, 0, ray.WHITE);
+    } else {
+        // Fallback: Draw a gradient background
+        ray.DrawRectangleGradientV(0, 0, game_state.screen_width, game_state.screen_height, ray.BLUE, ray.BLACK);
+    }
 
     // Draw menu options
     const options = [_][*:0]const u8{ "Start Game", "Quit" };
@@ -263,44 +302,15 @@ fn drawMenu(game_state: *GameState) void {
         const color = if (i == @intFromEnum(game_state.selected_option)) ray.WHITE else ray.GRAY;
         ray.DrawText(option, option_x, option_y, game_state.font_size, color);
     }
-
-    // Draw instructions
-    const instructions = "Use UP/DOWN to select, SPACE/ENTER to confirm";
-    const inst_width = ray.MeasureText(instructions, game_state.font_size);
-    const inst_x = @divTrunc(game_state.screen_width - inst_width, 2);
-    ray.DrawText(instructions, inst_x, game_state.screen_height - 50, game_state.font_size, ray.LIGHTGRAY);
 }
 
 fn drawStory(game_state: *GameState) void {
-    ray.BeginDrawing();
-    defer ray.EndDrawing();
-
-    ray.ClearBackground(ray.BLACK);
-
     // Draw current story panel
     const panel = game_state.story_panels[@as(usize, @intCast(game_state.story_panel))];
     ray.DrawTexture(panel, 0, 0, ray.ColorAlpha(ray.WHITE, game_state.story_transition));
-
-    // Draw story text
-    const text = game_state.story_texts[@as(usize, @intCast(game_state.story_panel))];
-    const text_width = ray.MeasureText(text.ptr, game_state.font_size);
-    const text_x = @divTrunc(game_state.screen_width - text_width, 2);
-    const text_y = game_state.screen_height - 100;
-    ray.DrawText(text.ptr, text_x, text_y, game_state.font_size, ray.ColorAlpha(ray.WHITE, game_state.story_transition));
-
-    // Draw instructions
-    const instructions = "Press SPACE/ENTER to continue, ESC to skip";
-    const inst_width = ray.MeasureText(instructions, game_state.font_size);
-    const inst_x = @divTrunc(game_state.screen_width - inst_width, 2);
-    ray.DrawText(instructions, inst_x, game_state.screen_height - 50, game_state.font_size, ray.LIGHTGRAY);
 }
 
 fn drawCharacterSelect(game_state: *GameState) void {
-    ray.BeginDrawing();
-    defer ray.EndDrawing();
-
-    ray.ClearBackground(ray.BLACK);
-
     // Draw title
     const title = "Choose Your Character";
     const title_width = ray.MeasureText(title, game_state.title_font_size);
@@ -314,6 +324,7 @@ fn drawCharacterSelect(game_state: *GameState) void {
     const spacing = 200;
     const center_x = @divTrunc(game_state.screen_width, 2);
 
+    // Draw avatars and titles
     for (game_state.character_classes, 0..) |character, i| {
         const x = center_x + (@as(i32, @intCast(i)) - 1) * spacing;
         const y = avatar_y;
@@ -327,33 +338,87 @@ fn drawCharacterSelect(game_state: *GameState) void {
         ray.DrawText(character.title, x - @divTrunc(title_width_char, 2), y + avatar_size + 20, game_state.font_size, color);
     }
 
-    // Draw selected character info
-    const info_y = avatar_y + avatar_size + 80;
-    const desc_width = 500;
-    const desc_x = center_x - @divTrunc(desc_width, 2);
-    ray.DrawText(selected_char.description, desc_x, info_y, game_state.font_size, ray.WHITE);
+    // Calculate two-column layout dimensions
+    const content_y = avatar_y + avatar_size + 60; // Start content below avatars
+    const column_width = @divTrunc(game_state.screen_width, 2) - 40; // Leave margin on sides
+    const left_column_x = 40;
+    const right_column_x = @divTrunc(game_state.screen_width, 2) + 20;
 
-    // Draw stats
-    const stats_y = info_y + 80;
-    const stats_spacing = 40;
-    const stats = [_]struct { name: [*:0]const u8, value: i32 }{
-        .{ .name = "Strength", .value = selected_char.stats.strength },
-        .{ .name = "Speed", .value = selected_char.stats.speed },
-        .{ .name = "Health", .value = selected_char.stats.health },
-    };
+    // Draw stats in left column
+    if (game_state.character_cursor >= 0) {
+        const bar_width = column_width - 60; // Leave space for labels
+        const bar_height = 15;
+        const bar_spacing = 25;
+        const stats_y = content_y;
 
-    for (stats, 0..) |stat, i| {
-        const y = stats_y + (@as(i32, @intCast(i)) * stats_spacing);
-        const text = ray.TextFormat("%s: %d", stat.name, stat.value);
-        const text_width = ray.MeasureText(text, game_state.font_size);
-        ray.DrawText(text, center_x - @divTrunc(text_width, 2), y, game_state.font_size, ray.WHITE);
+        // Draw stat labels and bars
+        const stats = [_]struct { name: [*:0]const u8, value: i32, color: ray.Color }{
+            .{ .name = "Health", .value = selected_char.stats.health, .color = ray.RED },
+            .{ .name = "Speed", .value = selected_char.stats.speed, .color = ray.BLUE },
+            .{ .name = "Strength", .value = selected_char.stats.strength, .color = ray.GREEN },
+        };
+
+        for (stats, 0..) |stat, stat_index| {
+            const bar_y = stats_y + (@as(i32, @intCast(stat_index)) * bar_spacing);
+
+            // Draw stat label
+            const label_width = ray.MeasureText(stat.name, game_state.font_size);
+            ray.DrawText(stat.name, left_column_x, bar_y, game_state.font_size, ray.WHITE);
+
+            // Draw stat value
+            const value_text = ray.TextFormat("%d/10", stat.value);
+            ray.DrawText(value_text, left_column_x + bar_width + 10, bar_y, game_state.font_size, ray.WHITE);
+
+            // Draw bar background
+            ray.DrawRectangle(left_column_x + label_width + 10, bar_y, bar_width - label_width - 10, bar_height, ray.ColorAlpha(ray.WHITE, 0.2));
+
+            // Draw filled bar
+            const fill_width = @as(i32, @intFromFloat(@as(f32, @floatFromInt(stat.value)) / 10.0 * @as(f32, @floatFromInt(bar_width - label_width - 10))));
+            ray.DrawRectangle(left_column_x + label_width + 10, bar_y, fill_width, bar_height, stat.color);
+
+            // Draw bar border
+            ray.DrawRectangleLines(left_column_x + label_width + 10, bar_y, bar_width - label_width - 10, bar_height, ray.WHITE);
+        }
     }
 
-    // Draw instructions
-    const instructions = "Use LEFT/RIGHT to select, ENTER/SPACE to confirm, ESC to go back";
-    const inst_width = ray.MeasureText(instructions, game_state.font_size);
-    const inst_x = @divTrunc(game_state.screen_width - inst_width, 2);
-    ray.DrawText(instructions, inst_x, game_state.screen_height - 50, game_state.font_size, ray.LIGHTGRAY);
+    // Draw description in right column with word wrapping
+    var current_x: i32 = right_column_x;
+    var current_y: i32 = content_y;
+    var current_word: [100]u8 = undefined;
+    var word_index: usize = 0;
+    var char_index: usize = 0;
+
+    while (selected_char.description[char_index] != 0) : (char_index += 1) {
+        if (selected_char.description[char_index] == ' ') {
+            current_word[word_index] = 0;
+            const word_width = ray.MeasureText(&current_word, game_state.font_size);
+
+            if (current_x + word_width > right_column_x + column_width) {
+                current_x = right_column_x;
+                current_y += game_state.font_size + 5;
+            }
+
+            ray.DrawText(&current_word, current_x, current_y, game_state.font_size, ray.WHITE);
+            current_x += word_width + ray.MeasureText(" ", game_state.font_size);
+            word_index = 0;
+        } else {
+            current_word[word_index] = selected_char.description[char_index];
+            word_index += 1;
+        }
+    }
+
+    // Draw the last word if any
+    if (word_index > 0) {
+        current_word[word_index] = 0;
+        const word_width = ray.MeasureText(&current_word, game_state.font_size);
+
+        if (current_x + word_width > right_column_x + column_width) {
+            current_x = right_column_x;
+            current_y += game_state.font_size + 5;
+        }
+
+        ray.DrawText(&current_word, current_x, current_y, game_state.font_size, ray.WHITE);
+    }
 }
 
 fn updateGame(game_state: *GameState) void {
@@ -363,15 +428,115 @@ fn updateGame(game_state: *GameState) void {
 }
 
 fn drawGame(game_state: *GameState) void {
-    ray.BeginDrawing();
-    defer ray.EndDrawing();
-
-    ray.ClearBackground(ray.BLACK);
-
     // Draw placeholder game screen
-    const text = "Game in progress... Press ESC to return to menu";
+    const text = "Game in progress...";
     const text_width = ray.MeasureText(text, game_state.font_size);
     const text_x = @divTrunc(game_state.screen_width - text_width, 2);
     const text_y = @divTrunc(game_state.screen_height - game_state.font_size, 2);
     ray.DrawText(text, text_x, text_y, game_state.font_size, ray.WHITE);
+}
+
+fn drawHelpIcon(game_state: *GameState) void {
+    const icon_size = 30;
+    const padding = 10;
+    const x = game_state.screen_width - icon_size - padding;
+    const y = padding;
+
+    // Draw circle background
+    ray.DrawCircle(x + @divTrunc(icon_size, 2), y + @divTrunc(icon_size, 2), @as(f32, @floatFromInt(icon_size)) / 2.0, ray.WHITE);
+
+    // Draw "?" text
+    const question_mark = "?";
+    const text_size = 24;
+    const text_width = ray.MeasureText(question_mark, text_size);
+    const text_x = x + @divTrunc(icon_size - text_width, 2);
+    const text_y = y + @divTrunc(icon_size - text_size, 2);
+    ray.DrawText(question_mark, text_x, text_y, text_size, ray.BLACK);
+}
+
+fn drawHelpOverlay(game_state: *GameState) void {
+    if (!game_state.show_help) return;
+
+    // Draw semi-transparent black background
+    ray.DrawRectangle(0, 0, game_state.screen_width, game_state.screen_height, ray.ColorAlpha(ray.BLACK, 0.8));
+
+    const help_text = switch (game_state.current_state) {
+        .Menu => "Menu Controls:\n\nUse UP/DOWN arrow keys to navigate\nPress SPACE or ENTER to select\n\nPress ? or ESC to close help",
+        .Story => "Story Controls:\n\nPress SPACE or ENTER to continue\nPress ESC to skip to character selection\n\nPress ? or ESC to close help",
+        .AvatarSelection => "Character Selection Controls:\n\nUse LEFT/RIGHT arrow keys to choose character\nPress SPACE or ENTER to confirm selection\nPress ESC to return to story\n\nPress ? or ESC to close help",
+        .Playing => "Game Controls:\n\nPress ESC to return to menu\n\nPress ? or ESC to close help",
+    };
+
+    // Calculate text dimensions for the background box
+    const line_height = game_state.font_size + 5;
+    var max_line_width: i32 = 0;
+    var num_lines: i32 = 1;
+    var i: usize = 0;
+
+    while (i < help_text.len) : (i += 1) {
+        if (help_text[i] == '\n') {
+            num_lines += 1;
+        } else {
+            var line_end = i;
+            while (line_end < help_text.len and help_text[line_end] != '\n') : (line_end += 1) {}
+            const line = help_text[i..line_end];
+            const line_width = ray.MeasureText(@ptrCast(line.ptr), game_state.font_size);
+            if (line_width > max_line_width) max_line_width = line_width;
+            i = line_end;
+        }
+    }
+
+    const box_padding = 20;
+    const box_width = max_line_width + (box_padding * 2);
+    const box_height = (num_lines * line_height) + (box_padding * 2);
+    const box_x = @divTrunc(game_state.screen_width - box_width, 2);
+    const box_y = @divTrunc(game_state.screen_height - box_height, 2);
+
+    // Draw help box background
+    ray.DrawRectangle(box_x, box_y, box_width, box_height, ray.BLACK);
+    ray.DrawRectangleLines(box_x, box_y, box_width, box_height, ray.WHITE);
+
+    // Draw help text
+    var current_y = box_y + box_padding;
+    var start: usize = 0;
+    i = 0;
+
+    while (i <= help_text.len) : (i += 1) {
+        if (i == help_text.len or help_text[i] == '\n') {
+            const line = help_text[start..i];
+            const text_x = box_x + box_padding;
+            ray.DrawText(@ptrCast(line.ptr), text_x, current_y, game_state.font_size, ray.WHITE);
+            current_y += line_height;
+            start = i + 1;
+        }
+    }
+}
+
+fn updateHelp(game_state: *GameState) void {
+    // Toggle help with question mark key
+    if (ray.IsKeyPressed(ray.KEY_SLASH)) {
+        game_state.show_help = !game_state.show_help;
+    }
+
+    // Toggle help with mouse click on icon
+    if (ray.IsMouseButtonPressed(ray.MOUSE_BUTTON_LEFT)) {
+        const mouse_pos = ray.GetMousePosition();
+        const icon_size = 30;
+        const padding = 10;
+        const x = game_state.screen_width - icon_size - padding;
+        const y = padding;
+
+        if (mouse_pos.x >= @as(f32, @floatFromInt(x)) and
+            mouse_pos.x <= @as(f32, @floatFromInt(x + icon_size)) and
+            mouse_pos.y >= @as(f32, @floatFromInt(y)) and
+            mouse_pos.y <= @as(f32, @floatFromInt(y + icon_size)))
+        {
+            game_state.show_help = !game_state.show_help;
+        }
+    }
+
+    // Close help with escape key
+    if (game_state.show_help and ray.IsKeyPressed(ray.KEY_ESCAPE)) {
+        game_state.show_help = false;
+    }
 }
