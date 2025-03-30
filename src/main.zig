@@ -6,66 +6,74 @@ const ray = @cImport({
 
 const MenuOption = enum {
     StartGame,
-    Options,
-    About,
-    Exit,
+    Quit,
+};
 
-    pub fn toString(self: MenuOption) [:0]const u8 {
-        return switch (self) {
-            .StartGame => "Start Game",
-            .Options => "Options",
-            .About => "About",
-            .Exit => "Exit",
-        };
-    }
+const CharacterClass = struct {
+    name: [*:0]const u8,
+    title: [*:0]const u8,
+    description: [*:0]const u8,
+    stats: struct {
+        strength: i32,
+        speed: i32,
+        health: i32,
+    },
+    avatar: ray.Texture2D,
 };
 
 const GameState = struct {
-    selected_option: MenuOption = .StartGame,
-    screen_width: i32 = 800,
-    screen_height: i32 = 450,
-    title_font_size: i32 = 40,
-    font_size: i32 = 20,
-    menu_spacing: i32 = 40,
-    should_exit: bool = false,
+    screen_width: i32,
+    screen_height: i32,
+    font_size: i32,
+    title_font_size: i32,
+    menu_spacing: i32,
+    selected_option: MenuOption,
     current_state: enum {
         Menu,
         Story,
         AvatarSelection,
-    } = .Menu,
-    story_panel: i32 = 0,
-    story_transition: f32 = 0.0,
-    story_panels: [3]ray.Texture2D = undefined,
-    story_texts: [3][:0]const u8 = .{
-        "In the year 2157, humanity faced its greatest challenge...",
-        "The alien fleet appeared without warning, their ships blotting out the stars...",
-        "But humanity would not go quietly into the night...",
+        Playing,
     },
+    story_panel: i32,
+    story_transition: f32,
+    story_panels: [3]ray.Texture2D,
+    story_texts: [3][:0]const u8,
+    character_cursor: i32,
+    character_classes: [3]CharacterClass,
 };
 
-pub fn main() !void {
-    var game_state = GameState{};
+fn cleanupGameState(game_state: *GameState) void {
+    // Unload story panel textures
+    for (game_state.story_panels) |texture| {
+        ray.UnloadTexture(texture);
+    }
 
-    // Initialize GLFW first
-    ray.SetConfigFlags(ray.FLAG_MSAA_4X_HINT);
-    ray.InitWindow(game_state.screen_width, game_state.screen_height, "Game Menu");
+    // Unload character avatars
+    for (game_state.character_classes) |character| {
+        ray.UnloadTexture(character.avatar);
+    }
+}
+
+pub fn main() !void {
+    ray.InitWindow(800, 450, "Ancient Powers");
     defer ray.CloseWindow();
 
     ray.SetTargetFPS(60);
 
-    // Load story panel images
+    var game_state = initGameState();
+    defer cleanupGameState(&game_state);
+
+    // Load story panel textures
     game_state.story_panels[0] = ray.LoadTexture("assets/story/panel1.png");
     game_state.story_panels[1] = ray.LoadTexture("assets/story/panel2.png");
     game_state.story_panels[2] = ray.LoadTexture("assets/story/panel3.png");
 
-    // Defer unloading textures
-    defer {
-        for (game_state.story_panels) |panel| {
-            ray.UnloadTexture(panel);
-        }
-    }
+    // Load character avatars
+    game_state.character_classes[0].avatar = ray.LoadTexture("assets/avatars/avatar_strength_0.png");
+    game_state.character_classes[1].avatar = ray.LoadTexture("assets/avatars/avatar_speed_0.png");
+    game_state.character_classes[2].avatar = ray.LoadTexture("assets/avatars/avatar_balanced_0.png");
 
-    while (!ray.WindowShouldClose() and !game_state.should_exit) {
+    while (!ray.WindowShouldClose()) {
         switch (game_state.current_state) {
             .Menu => {
                 updateMenu(&game_state);
@@ -76,28 +84,84 @@ pub fn main() !void {
                 drawStory(&game_state);
             },
             .AvatarSelection => {
-                // TODO: Implement avatar selection
-                game_state.current_state = .Menu;
+                updateCharacterSelect(&game_state);
+                drawCharacterSelect(&game_state);
+            },
+            .Playing => {
+                updateGame(&game_state);
+                drawGame(&game_state);
             },
         }
     }
 }
 
+fn initGameState() GameState {
+    return .{
+        .screen_width = 800,
+        .screen_height = 450,
+        .font_size = 20,
+        .title_font_size = 40,
+        .menu_spacing = 40,
+        .selected_option = .StartGame,
+        .current_state = .Menu,
+        .story_panel = 0,
+        .story_transition = 0.0,
+        .story_panels = undefined,
+        .story_texts = [_][:0]const u8{
+            "In a world where darkness threatens to consume all...",
+            "Three ancient powers awaken, each with their own destiny...",
+            "Choose your path, and let your journey begin...",
+        },
+        .character_cursor = 0,
+        .character_classes = [_]CharacterClass{
+            .{
+                .name = "strength",
+                .title = "Warrior",
+                .description = "A mighty warrior who excels in close combat. Your strength is legendary, and your presence on the battlefield is feared by all.",
+                .stats = .{
+                    .strength = 8,
+                    .speed = 4,
+                    .health = 7,
+                },
+                .avatar = undefined,
+            },
+            .{
+                .name = "speed",
+                .title = "Scout",
+                .description = "A swift and agile scout who strikes with precision. Your speed and reflexes make you a deadly opponent in any situation.",
+                .stats = .{
+                    .strength = 4,
+                    .speed = 8,
+                    .health = 5,
+                },
+                .avatar = undefined,
+            },
+            .{
+                .name = "balanced",
+                .title = "Guardian",
+                .description = "A balanced warrior who combines strength and agility. Your versatility makes you a formidable opponent in any situation.",
+                .stats = .{
+                    .strength = 6,
+                    .speed = 6,
+                    .health = 6,
+                },
+                .avatar = undefined,
+            },
+        },
+    };
+}
+
 fn updateMenu(game_state: *GameState) void {
-    if (ray.IsKeyPressed(ray.KEY_UP) or ray.IsKeyPressed(ray.KEY_W)) {
+    if (ray.IsKeyPressed(ray.KEY_UP)) {
         game_state.selected_option = switch (game_state.selected_option) {
-            .StartGame => .Exit,
-            .Options => .StartGame,
-            .About => .Options,
-            .Exit => .About,
+            .StartGame => .Quit,
+            .Quit => .StartGame,
         };
     }
-    if (ray.IsKeyPressed(ray.KEY_DOWN) or ray.IsKeyPressed(ray.KEY_S)) {
+    if (ray.IsKeyPressed(ray.KEY_DOWN)) {
         game_state.selected_option = switch (game_state.selected_option) {
-            .StartGame => .Options,
-            .Options => .About,
-            .About => .Exit,
-            .Exit => .StartGame,
+            .StartGame => .Quit,
+            .Quit => .StartGame,
         };
     }
     if (ray.IsKeyPressed(ray.KEY_ENTER) or ray.IsKeyPressed(ray.KEY_SPACE)) {
@@ -107,26 +171,14 @@ fn updateMenu(game_state: *GameState) void {
                 game_state.story_panel = 0;
                 game_state.story_transition = 0.0;
             },
-            .Options => {
-                // Show options menu
-            },
-            .About => {
-                // Show about screen
-            },
-            .Exit => {
-                game_state.should_exit = true;
+            .Quit => {
+                ray.CloseWindow();
             },
         }
     }
 }
 
 fn updateStory(game_state: *GameState) void {
-    // Update transition
-    if (game_state.story_transition < 1.0) {
-        game_state.story_transition += 0.02;
-    }
-
-    // Handle input
     if (ray.IsKeyPressed(ray.KEY_SPACE) or ray.IsKeyPressed(ray.KEY_ENTER)) {
         if (game_state.story_panel < 2) {
             game_state.story_panel += 1;
@@ -138,6 +190,26 @@ fn updateStory(game_state: *GameState) void {
     if (ray.IsKeyPressed(ray.KEY_ESCAPE)) {
         game_state.current_state = .AvatarSelection;
     }
+
+    // Update transition animation
+    if (game_state.story_transition < 1.0) {
+        game_state.story_transition += 0.02;
+    }
+}
+
+fn updateCharacterSelect(game_state: *GameState) void {
+    if (ray.IsKeyPressed(ray.KEY_LEFT)) {
+        game_state.character_cursor = if (game_state.character_cursor == 0) 2 else game_state.character_cursor - 1;
+    }
+    if (ray.IsKeyPressed(ray.KEY_RIGHT)) {
+        game_state.character_cursor = if (game_state.character_cursor == 2) 0 else game_state.character_cursor + 1;
+    }
+    if (ray.IsKeyPressed(ray.KEY_ENTER) or ray.IsKeyPressed(ray.KEY_SPACE)) {
+        game_state.current_state = .Playing;
+    }
+    if (ray.IsKeyPressed(ray.KEY_ESCAPE)) {
+        game_state.current_state = .Story;
+    }
 }
 
 fn drawMenu(game_state: *GameState) void {
@@ -146,24 +218,27 @@ fn drawMenu(game_state: *GameState) void {
 
     ray.ClearBackground(ray.BLACK);
 
-    const title = "My Game";
+    // Draw title
+    const title = "Ancient Powers";
     const title_width = ray.MeasureText(title, game_state.title_font_size);
     const title_x = @divTrunc(game_state.screen_width - title_width, 2);
-    const title_y = @divTrunc(game_state.screen_height, 4);
+    ray.DrawText(title, title_x, 100, game_state.title_font_size, ray.WHITE);
 
-    ray.DrawText(title, title_x, title_y, game_state.title_font_size, ray.WHITE);
-
-    var menu_y = @divTrunc(game_state.screen_height, 2);
-    inline for (std.meta.fields(MenuOption)) |field| {
-        const option = @field(MenuOption, field.name);
-        const text = option.toString();
-        const text_width = ray.MeasureText(text.ptr, game_state.font_size);
-        const text_x = @divTrunc(game_state.screen_width - text_width, 2);
-
-        const color = if (game_state.selected_option == option) ray.GREEN else ray.LIGHTGRAY;
-        ray.DrawText(text.ptr, text_x, menu_y, game_state.font_size, color);
-        menu_y += game_state.menu_spacing;
+    // Draw menu options
+    const options = [_][*:0]const u8{ "Start Game", "Quit" };
+    for (options, 0..) |option, i| {
+        const option_width = ray.MeasureText(option, game_state.font_size);
+        const option_x = @divTrunc(game_state.screen_width - option_width, 2);
+        const option_y = 250 + (@as(i32, @intCast(i)) * game_state.menu_spacing);
+        const color = if (i == @intFromEnum(game_state.selected_option)) ray.WHITE else ray.GRAY;
+        ray.DrawText(option, option_x, option_y, game_state.font_size, color);
     }
+
+    // Draw instructions
+    const instructions = "Use UP/DOWN to select, SPACE/ENTER to confirm";
+    const inst_width = ray.MeasureText(instructions, game_state.font_size);
+    const inst_x = @divTrunc(game_state.screen_width - inst_width, 2);
+    ray.DrawText(instructions, inst_x, game_state.screen_height - 50, game_state.font_size, ray.LIGHTGRAY);
 }
 
 fn drawStory(game_state: *GameState) void {
@@ -172,29 +247,101 @@ fn drawStory(game_state: *GameState) void {
 
     ray.ClearBackground(ray.BLACK);
 
-    // Draw current panel with transition
-    const panel = game_state.story_panels[@intCast(game_state.story_panel)];
-    const tint = ray.ColorAlpha(ray.WHITE, game_state.story_transition);
-
-    // Center the panel
-    const panel_x = @divTrunc(game_state.screen_width - panel.width, 2);
-    const panel_y = @divTrunc(game_state.screen_height - panel.height, 2);
-
-    ray.DrawTexture(panel, panel_x, panel_y, tint);
+    // Draw current story panel
+    const panel = game_state.story_panels[@as(usize, @intCast(game_state.story_panel))];
+    ray.DrawTexture(panel, 0, 0, ray.ColorAlpha(ray.WHITE, game_state.story_transition));
 
     // Draw story text
-    const text = game_state.story_texts[@intCast(game_state.story_panel)];
+    const text = game_state.story_texts[@as(usize, @intCast(game_state.story_panel))];
     const text_width = ray.MeasureText(text.ptr, game_state.font_size);
     const text_x = @divTrunc(game_state.screen_width - text_width, 2);
     const text_y = game_state.screen_height - 100;
-
-    ray.DrawText(text.ptr, text_x, text_y, game_state.font_size, ray.WHITE);
+    ray.DrawText(text.ptr, text_x, text_y, game_state.font_size, ray.ColorAlpha(ray.WHITE, game_state.story_transition));
 
     // Draw instructions
-    const skip_text = "Press SPACE/ENTER to continue, ESC to skip";
-    const skip_width = ray.MeasureText(skip_text, game_state.font_size);
-    const skip_x = @divTrunc(game_state.screen_width - skip_width, 2);
-    const skip_y = game_state.screen_height - 50;
+    const instructions = "Press SPACE/ENTER to continue, ESC to skip";
+    const inst_width = ray.MeasureText(instructions, game_state.font_size);
+    const inst_x = @divTrunc(game_state.screen_width - inst_width, 2);
+    ray.DrawText(instructions, inst_x, game_state.screen_height - 50, game_state.font_size, ray.LIGHTGRAY);
+}
 
-    ray.DrawText(skip_text, skip_x, skip_y, game_state.font_size, ray.LIGHTGRAY);
+fn drawCharacterSelect(game_state: *GameState) void {
+    ray.BeginDrawing();
+    defer ray.EndDrawing();
+
+    ray.ClearBackground(ray.BLACK);
+
+    // Draw title
+    const title = "Choose Your Character";
+    const title_width = ray.MeasureText(title, game_state.title_font_size);
+    const title_x = @divTrunc(game_state.screen_width - title_width, 2);
+    ray.DrawText(title, title_x, 50, game_state.title_font_size, ray.WHITE);
+
+    // Draw character avatars and info
+    const selected_char = &game_state.character_classes[@as(usize, @intCast(game_state.character_cursor))];
+    const avatar_size = 128;
+    const avatar_y = 100;
+    const spacing = 200;
+    const center_x = @divTrunc(game_state.screen_width, 2);
+
+    for (game_state.character_classes, 0..) |character, i| {
+        const x = center_x + (@as(i32, @intCast(i)) - 1) * spacing;
+        const y = avatar_y;
+        const source_rect = ray.Rectangle{ .x = 0, .y = 0, .width = @floatFromInt(avatar_size), .height = @floatFromInt(avatar_size) };
+        const dest_rect = ray.Rectangle{ .x = @floatFromInt(x - @divTrunc(avatar_size, 2)), .y = @floatFromInt(y), .width = @floatFromInt(avatar_size), .height = @floatFromInt(avatar_size) };
+        const color = if (i == @as(usize, @intCast(game_state.character_cursor))) ray.WHITE else ray.GRAY;
+        ray.DrawTexturePro(character.avatar, source_rect, dest_rect, .{ .x = 0, .y = 0 }, 0, color);
+
+        // Draw character title
+        const title_width_char = ray.MeasureText(character.title, game_state.font_size);
+        ray.DrawText(character.title, x - @divTrunc(title_width_char, 2), y + avatar_size + 20, game_state.font_size, color);
+    }
+
+    // Draw selected character info
+    const info_y = avatar_y + avatar_size + 80;
+    const desc_width = 500;
+    const desc_x = center_x - @divTrunc(desc_width, 2);
+    ray.DrawText(selected_char.description, desc_x, info_y, game_state.font_size, ray.WHITE);
+
+    // Draw stats
+    const stats_y = info_y + 80;
+    const stats_spacing = 40;
+    const stats = [_]struct { name: [*:0]const u8, value: i32 }{
+        .{ .name = "Strength", .value = selected_char.stats.strength },
+        .{ .name = "Speed", .value = selected_char.stats.speed },
+        .{ .name = "Health", .value = selected_char.stats.health },
+    };
+
+    for (stats, 0..) |stat, i| {
+        const y = stats_y + (@as(i32, @intCast(i)) * stats_spacing);
+        const text = ray.TextFormat("%s: %d", stat.name, stat.value);
+        const text_width = ray.MeasureText(text, game_state.font_size);
+        ray.DrawText(text, center_x - @divTrunc(text_width, 2), y, game_state.font_size, ray.WHITE);
+    }
+
+    // Draw instructions
+    const instructions = "Use LEFT/RIGHT to select, ENTER/SPACE to confirm, ESC to go back";
+    const inst_width = ray.MeasureText(instructions, game_state.font_size);
+    const inst_x = @divTrunc(game_state.screen_width - inst_width, 2);
+    ray.DrawText(instructions, inst_x, game_state.screen_height - 50, game_state.font_size, ray.LIGHTGRAY);
+}
+
+fn updateGame(game_state: *GameState) void {
+    if (ray.IsKeyPressed(ray.KEY_ESCAPE)) {
+        game_state.current_state = .Menu;
+    }
+}
+
+fn drawGame(game_state: *GameState) void {
+    ray.BeginDrawing();
+    defer ray.EndDrawing();
+
+    ray.ClearBackground(ray.BLACK);
+
+    // Draw placeholder game screen
+    const text = "Game in progress... Press ESC to return to menu";
+    const text_width = ray.MeasureText(text, game_state.font_size);
+    const text_x = @divTrunc(game_state.screen_width - text_width, 2);
+    const text_y = @divTrunc(game_state.screen_height - game_state.font_size, 2);
+    ray.DrawText(text, text_x, text_y, game_state.font_size, ray.WHITE);
 }
