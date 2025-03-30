@@ -1,33 +1,57 @@
-# My 2D Game
+# Game1
 
-A 2D game written in Zig using the raylib library.
+A simple game project using Zig and raylib.
 
 ## Prerequisites
 
-- [Zig](https://ziglang.org/) (latest version)
-- [raylib](https://www.raylib.com/) (will be downloaded automatically)
+- Zig (latest version)
+- Git
 
-## Setup
+## Building
 
-1. Clone this repository
-2. Clone raylib into the project directory:
-   ```bash
-   git clone https://github.com/raysan5/raylib.git
-   ```
+```bash
+zig build
+```
 
-## Building and Running
-
-To build and run the game:
+## Running
 
 ```bash
 zig build run
 ```
 
+## Project Structure
+
+- `src/main.zig` - Main game code
+- `build.zig` - Build configuration
+- `raylib/` - raylib library (git submodule)
+
+## Development Setup
+
+### Cloning the Repository
+
+When cloning this repository, you'll need to initialize and update the raylib submodule:
+
+```bash
+git clone <repository-url>
+cd game1
+git submodule update --init --recursive
+```
+
+### Updating raylib
+
+To update raylib to the latest version:
+
+```bash
+git submodule update --remote raylib
+git add raylib
+git commit -m "Update raylib to latest version"
+```
+
 ## Controls
 
-- Use UP/DOWN arrow keys to navigate the menu
-- Press ENTER to select a menu option
-- Press ESC to exit the game
+- Arrow keys or W/S: Navigate menu options
+- Enter or Space: Select menu option
+- ESC: Close window
 
 ## Features
 
