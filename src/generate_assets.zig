@@ -24,17 +24,34 @@ pub fn main() !void {
     };
 
     for (panels) |panel| {
-        // Create image
-        const image = ray.GenImageColor(800, 450, panel.color);
+        // Check if file exists
+        if (std.fs.cwd().openFile(panel.name[0..std.mem.len(panel.name)], .{})) |file| {
+            file.close();
+            std.debug.print("Skipping {s} (already exists)\n", .{panel.name});
+        } else |err| {
+            switch (err) {
+                error.FileNotFound => {
+                    // File doesn't exist, generate it
+                    std.debug.print("Generating {s}...\n", .{panel.name});
 
-        // Export image
-        const success = ray.ExportImage(image, panel.name);
-        if (!success) {
-            std.debug.print("Failed to export image: {s}\n", .{panel.name});
-            return error.ImageExportFailed;
+                    // Create image
+                    const image = ray.GenImageColor(800, 450, panel.color);
+
+                    // Export image
+                    const success = ray.ExportImage(image, panel.name);
+                    if (!success) {
+                        std.debug.print("Failed to export image: {s}\n", .{panel.name});
+                        return error.ImageExportFailed;
+                    }
+
+                    // Unload image
+                    ray.UnloadImage(image);
+                },
+                else => {
+                    std.debug.print("Error checking file {s}: {any}\n", .{ panel.name, err });
+                    return err;
+                },
+            }
         }
-
-        // Unload image
-        ray.UnloadImage(image);
     }
 }
