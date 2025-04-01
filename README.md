@@ -13,6 +13,23 @@ A simple game project using Zig and raylib.
 zig build
 ```
 
+## Creating a binary
+
+```bash
+# Clean everything
+rm -rf zig-out .zig-cache
+
+# Build release with verbose output
+zig build release --verbose
+
+# Check the cache directory for the executable
+ls -l .zig-cache/o/*/AncientPowers
+
+zig build install
+```
+
+The output of this will be that in the `./zig-out/bin` directory there will be a binary app called `AncientPowers` that you can run
+
 ## Running
 
 ```bash
