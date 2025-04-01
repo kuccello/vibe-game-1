@@ -77,6 +77,7 @@ const Player = struct {
     experience: f32,
     gold: i32,
     energy: f32,
+    hit_timer: f32,
 };
 
 const EnemyType = enum {
@@ -98,6 +99,7 @@ const Enemy = struct {
     charge_direction: Vector2,
     charge_energy: f32,
     is_charging: bool,
+    hit_timer: f32,
 };
 
 const Projectile = struct {
@@ -125,6 +127,7 @@ const GameWorld = struct {
     spawn_interval: f32,
     difficulty: f32,
     camera: ray.Camera2D,
+    level_timer: f32, // Timer in seconds
 };
 
 const GameState = struct {
@@ -139,6 +142,7 @@ const GameState = struct {
         Story,
         AvatarSelection,
         Playing,
+        GameOver,
     },
     story_panel: i32,
     story_transition: f32,
@@ -149,9 +153,15 @@ const GameState = struct {
     story_music: ray.Music,
     character_select_music: ray.Music,
     title_music: ray.Music,
+    level_music: ray.Music,
+    collect_sound: ray.Sound,
+    spawn_sound: ray.Sound,
+    warrior_attack_sound: ray.Sound,
     show_help: bool,
     title_background: ray.Texture2D,
     game_world: ?*GameWorld,
+    floor_tiles: [3]ray.Texture2D,
+    font: ray.Font,
 };
 
 fn cleanupGameState(game_state: *GameState) void {
@@ -165,10 +175,21 @@ fn cleanupGameState(game_state: *GameState) void {
         ray.UnloadTexture(character.avatar);
     }
 
+    // Unload floor tiles
+    for (game_state.floor_tiles) |texture| {
+        ray.UnloadTexture(texture);
+    }
+
     // Unload music
     ray.UnloadMusicStream(game_state.story_music);
     ray.UnloadMusicStream(game_state.character_select_music);
     ray.UnloadMusicStream(game_state.title_music);
+    ray.UnloadMusicStream(game_state.level_music);
+
+    // Unload sounds
+    ray.UnloadSound(game_state.collect_sound);
+    ray.UnloadSound(game_state.spawn_sound);
+    ray.UnloadSound(game_state.warrior_attack_sound);
 
     // Unload title background
     ray.UnloadTexture(game_state.title_background);
@@ -217,6 +238,7 @@ pub fn main() !void {
             .Story => ray.UpdateMusicStream(game_state.story_music),
             .AvatarSelection => ray.UpdateMusicStream(game_state.character_select_music),
             .Playing => {},
+            .GameOver => {},
         }
 
         ray.BeginDrawing();
@@ -241,6 +263,15 @@ pub fn main() !void {
                 if (!game_state.show_help) updateGame(&game_state);
                 drawGame(&game_state);
             },
+            .GameOver => {
+                if (!game_state.show_help) {
+                    if (ray.IsKeyPressed(ray.KEY_ENTER)) {
+                        game_state.current_state = .Menu;
+                        ray.PlayMusicStream(game_state.title_music);
+                    }
+                }
+                drawGame(&game_state);
+            },
         }
 
         // Draw help icon and overlay
@@ -254,6 +285,22 @@ fn initGameState() GameState {
     const story_music = ray.LoadMusicStream("assets/music/Music1.mp3");
     const character_select_music = ray.LoadMusicStream("assets/music/Music2.mp3");
     const title_music = ray.LoadMusicStream("assets/music/TitleScreen.mp3");
+    const level_music = ray.LoadMusicStream("assets/music/level-music-1.mp3");
+
+    // Load sound effects
+    const collect_sound = ray.LoadSound("assets/sounds/Collected1.mp3");
+    const spawn_sound = ray.LoadSound("assets/sounds/CreatureArrives.mp3");
+    const warrior_attack_sound = ray.LoadSound("assets/sounds/WarriorAttack.mp3");
+
+    // Load floor tiles
+    const floor_tiles = [_]ray.Texture2D{
+        ray.LoadTexture("assets/tiles/floor-dun-1.png"),
+        ray.LoadTexture("assets/tiles/floor-dun-2.png"),
+        ray.LoadTexture("assets/tiles/floor-dun-3.png"),
+    };
+
+    // Load font
+    const font = ray.LoadFont("assets/fonts/font.ttf");
 
     return .{
         .screen_width = 800,
@@ -310,9 +357,15 @@ fn initGameState() GameState {
         .story_music = story_music,
         .character_select_music = character_select_music,
         .title_music = title_music,
+        .level_music = level_music,
+        .collect_sound = collect_sound,
+        .spawn_sound = spawn_sound,
+        .warrior_attack_sound = warrior_attack_sound,
         .show_help = false,
         .title_background = undefined,
         .game_world = null,
+        .floor_tiles = floor_tiles,
+        .font = font,
     };
 }
 
@@ -383,6 +436,7 @@ fn updateCharacterSelect(game_state: *GameState) void {
     }
     if (ray.IsKeyPressed(ray.KEY_ENTER) or ray.IsKeyPressed(ray.KEY_SPACE)) {
         ray.StopMusicStream(game_state.character_select_music);
+        ray.PlayMusicStream(game_state.level_music);
 
         // Initialize game world with selected character
         var character_type: CharacterType = undefined;
@@ -547,21 +601,31 @@ fn drawCharacterSelect(game_state: *GameState) void {
 fn updateGame(game_state: *GameState) void {
     if (game_state.game_world == null) return;
     const world = game_state.game_world.?;
+    const delta_time = ray.GetFrameTime();
 
-    // Check for game over or menu return
-    if (world.player.health <= 0 or ray.IsKeyPressed(ray.KEY_ESCAPE)) {
+    // Update hit timers
+    world.player.hit_timer -= delta_time;
+
+    // Update level timer
+    world.level_timer -= delta_time;
+
+    // Update level music
+    ray.UpdateMusicStream(game_state.level_music);
+
+    // Check for game over conditions
+    if (world.player.health <= 0 or world.level_timer <= 0) {
         // Clean up game world
         cleanupGameWorld(std.heap.page_allocator, world);
         game_state.game_world = null;
 
-        // Return to menu
-        game_state.current_state = .Menu;
-        ray.PlayMusicStream(game_state.title_music);
+        // Stop level music and transition to game over
+        ray.StopMusicStream(game_state.level_music);
+        game_state.current_state = .GameOver;
         return;
     }
 
     // Update player movement
-    const move_speed = 200.0;
+    const move_speed = 100.0;
     var move_dir = Vector2{ .x = 0, .y = 0 };
 
     if (ray.IsKeyDown(ray.KEY_W)) move_dir.y -= 1;
@@ -578,11 +642,11 @@ fn updateGame(game_state: *GameState) void {
     }
 
     // Update player position
-    const delta_time = ray.GetFrameTime();
     world.player.position = world.player.position.add(world.player.velocity.scale(delta_time));
 
     // Update camera to follow player
     world.camera.target = world.player.position.toRaylib();
+    world.camera.offset = .{ .x = @as(f32, @floatFromInt(game_state.screen_width)) / 2.0, .y = @as(f32, @floatFromInt(game_state.screen_height)) / 2.0 };
 
     // Update player attack
     world.player.attack_timer -= delta_time;
@@ -592,6 +656,9 @@ fn updateGame(game_state: *GameState) void {
         // Perform attack based on character type
         switch (world.player.character_type) {
             .Warrior => {
+                // Play warrior attack sound
+                ray.PlaySound(game_state.warrior_attack_sound);
+
                 // Melee attack
                 for (world.enemies.items) |*enemy| {
                     const dist = enemy.position.sub(world.player.position).length();
@@ -614,7 +681,7 @@ fn updateGame(game_state: *GameState) void {
                 // Ranged attack
                 world.projectiles.append(.{
                     .position = world.player.position,
-                    .velocity = world.player.direction.scale(400),
+                    .velocity = world.player.direction.scale(300),
                     .damage = world.player.attack_damage,
                     .range = world.player.attack_range,
                     .distance_traveled = 0,
@@ -648,31 +715,24 @@ fn updateGame(game_state: *GameState) void {
         proj.position = proj.position.add(proj.velocity.scale(delta_time));
         proj.distance_traveled += proj.velocity.length() * delta_time;
 
-        // Check for hits
-        var j: usize = 0;
-        while (j < world.enemies.items.len) {
-            const enemy = &world.enemies.items[j];
-            const dist = enemy.position.sub(proj.position).length();
-            if (dist < 20) {
-                enemy.health -= proj.damage;
-                if (enemy.health <= 0) {
-                    world.loot.append(.{
-                        .position = enemy.position,
-                        .experience = 10.0 * world.difficulty,
-                        .gold = @intFromFloat(5.0 * world.difficulty),
-                        .energy = 5.0 * world.difficulty,
-                        .pickup_radius = 50,
-                    }) catch {};
-                }
-                _ = world.projectiles.swapRemove(i);
-                break;
-            }
-            j += 1;
+        var should_remove = false;
+
+        // Check for hits on player only
+        const dist_to_player = world.player.position.sub(proj.position).length();
+        if (dist_to_player < 20) {
+            world.player.health -= proj.damage;
+            world.player.hit_timer = 0.5; // Set hit timer for 0.5 seconds
+            should_remove = true;
         }
 
-        // Remove projectiles that have traveled their range
-        if (proj.distance_traveled >= proj.range) {
-            _ = world.projectiles.swapRemove(i);
+        // Check if projectile has traveled its range
+        if (!should_remove and proj.distance_traveled >= proj.range) {
+            should_remove = true;
+        }
+
+        // Remove projectile if needed
+        if (should_remove) {
+            _ = world.projectiles.orderedRemove(i);
         } else {
             i += 1;
         }
@@ -682,10 +742,11 @@ fn updateGame(game_state: *GameState) void {
     i = 0;
     while (i < world.enemies.items.len) {
         const enemy = &world.enemies.items[i];
+        enemy.hit_timer -= delta_time;
 
         // Update enemy position
         const dir_to_player = world.player.position.sub(enemy.position).normalize();
-        enemy.velocity = dir_to_player.scale(100.0);
+        enemy.velocity = dir_to_player.scale(50.0);
         enemy.position = enemy.position.add(enemy.velocity.scale(delta_time));
 
         // Update enemy attack
@@ -698,6 +759,7 @@ fn updateGame(game_state: *GameState) void {
                     const dist = enemy.position.sub(world.player.position).length();
                     if (dist <= enemy.attack_range) {
                         world.player.health -= enemy.damage;
+                        world.player.hit_timer = 0.5; // Set hit timer for 0.5 seconds
                     }
                 },
                 .Ranged => {
@@ -747,6 +809,7 @@ fn updateGame(game_state: *GameState) void {
             world.player.experience += loot.experience;
             world.player.gold += loot.gold;
             world.player.energy += loot.energy;
+            ray.PlaySound(game_state.collect_sound);
             _ = world.loot.swapRemove(i);
         } else {
             i += 1;
@@ -757,6 +820,7 @@ fn updateGame(game_state: *GameState) void {
     world.spawn_timer -= delta_time;
     if (world.spawn_timer <= 0) {
         world.spawn_timer = world.spawn_interval;
+        ray.PlaySound(game_state.spawn_sound);
 
         // Spawn position away from player
         const spawn_dist = 400.0;
@@ -782,6 +846,7 @@ fn updateGame(game_state: *GameState) void {
                 .charge_direction = .{ .x = 0, .y = 0 },
                 .charge_energy = 0,
                 .is_charging = false,
+                .hit_timer = 0,
             },
             .Ranged => Enemy{
                 .position = spawn_pos,
@@ -796,6 +861,7 @@ fn updateGame(game_state: *GameState) void {
                 .charge_direction = .{ .x = 0, .y = 0 },
                 .charge_energy = 0,
                 .is_charging = false,
+                .hit_timer = 0,
             },
             .Charger => Enemy{
                 .position = spawn_pos,
@@ -810,6 +876,7 @@ fn updateGame(game_state: *GameState) void {
                 .charge_direction = .{ .x = 0, .y = 0 },
                 .charge_energy = 0,
                 .is_charging = false,
+                .hit_timer = 0,
             },
         };
 
@@ -817,29 +884,129 @@ fn updateGame(game_state: *GameState) void {
     }
 }
 
+fn invertColor(color: ray.Color) ray.Color {
+    return .{
+        .r = @as(u8, @intCast(255 - color.r)),
+        .g = @as(u8, @intCast(255 - color.g)),
+        .b = @as(u8, @intCast(255 - color.b)),
+        .a = color.a,
+    };
+}
+
 fn drawGame(game_state: *GameState) void {
+    // Draw game over message if in game over state
+    if (game_state.current_state == .GameOver) {
+        // Draw semi-transparent black background
+        ray.DrawRectangle(0, 0, game_state.screen_width, game_state.screen_height, ray.ColorAlpha(ray.BLACK, 0.7));
+
+        // Draw game over message
+        const message = "The Ancient Power has eluded you!";
+        const message_size = 40;
+        const message_width = ray.MeasureText(message, message_size);
+        const message_x = @divTrunc(game_state.screen_width - message_width, 2);
+        const message_y = @divTrunc(game_state.screen_height, 2) - message_size;
+
+        // Draw message with shadow for better visibility
+        ray.DrawText(message, message_x + 2, message_y + 2, message_size, ray.BLACK);
+        ray.DrawText(message, message_x, message_y, message_size, ray.WHITE);
+
+        // Draw continue prompt
+        const prompt = "Press ENTER to continue";
+        const prompt_size = 20;
+        const prompt_width = ray.MeasureText(prompt, prompt_size);
+        const prompt_x = @divTrunc(game_state.screen_width - prompt_width, 2);
+        const prompt_y = message_y + message_size + 20;
+        ray.DrawText(prompt, prompt_x, prompt_y, prompt_size, ray.WHITE);
+        return;
+    }
+
+    // Only draw game world if we're in the playing state
     if (game_state.game_world == null) return;
     const world = game_state.game_world.?;
 
     // Begin camera mode
     ray.BeginMode2D(world.camera);
 
-    // Draw player
-    ray.DrawCircleV(world.player.position.toRaylib(), 20, ray.BLUE);
+    // Draw floor tiles
+    const tile_size = 32.0; // Assuming tiles are 32x32 pixels
+    const camera_pos = world.camera.target;
+    const camera_zoom = world.camera.zoom;
+    const screen_width = @as(f32, @floatFromInt(game_state.screen_width));
+    const screen_height = @as(f32, @floatFromInt(game_state.screen_height));
+
+    // Calculate visible area in world coordinates
+    const visible_width = screen_width / camera_zoom;
+    const visible_height = screen_height / camera_zoom;
+
+    // Calculate tile grid boundaries
+    const start_x = camera_pos.x - visible_width / 2 - tile_size;
+    const start_y = camera_pos.y - visible_height / 2 - tile_size;
+    const end_x = camera_pos.x + visible_width / 2 + tile_size;
+    const end_y = camera_pos.y + visible_height / 2 + tile_size;
+
+    // Align to tile grid
+    const grid_start_x = @floor(start_x / tile_size) * tile_size;
+    const grid_start_y = @floor(start_y / tile_size) * tile_size;
+
+    var x = grid_start_x;
+    while (x < end_x) : (x += tile_size) {
+        var y = grid_start_y;
+        while (y < end_y) : (y += tile_size) {
+            // Use a more robust hashing method that handles negative numbers
+            const tile_x = @as(i32, @intFromFloat(@divFloor(x, tile_size)));
+            const tile_y = @as(i32, @intFromFloat(@divFloor(y, tile_size)));
+            const hash = @as(u32, @intCast(@abs(tile_x *% tile_y)));
+            const tile_index = if (hash % 100 < 5) // 5% chance for variant tiles
+                @as(usize, @intFromFloat(@mod(@as(f32, @floatFromInt(hash)), 3)))
+            else
+                0; // Use main tile (floor-dun-1) 95% of the time
+
+            const tile = game_state.floor_tiles[tile_index];
+            ray.DrawTextureV(tile, .{ .x = x, .y = y }, ray.WHITE);
+        }
+    }
+
+    // Draw player with attack indicator
+    const player_color = if (world.player.attack_timer < 0.1) // Blink during attack
+        invertColor(ray.BLUE)
+    else
+        ray.BLUE;
+    ray.DrawCircleV(world.player.position.toRaylib(), 20, player_color);
+
+    // Draw player hit indicator
+    if (world.player.hit_timer > 0) {
+        const hit_pos = world.player.position.sub(.{ .x = 0, .y = 30 });
+        const hit_x = @as(i32, @intFromFloat(hit_pos.toRaylib().x - 5));
+        const hit_y = @as(i32, @intFromFloat(hit_pos.toRaylib().y - 10));
+        ray.DrawText("!", hit_x, hit_y, 20, ray.RED);
+    }
 
     // Draw player direction indicator
     const dir_indicator = world.player.position.add(world.player.direction.scale(30));
     ray.DrawLineV(world.player.position.toRaylib(), dir_indicator.toRaylib(), ray.WHITE);
 
-    // Draw enemies
+    // Draw enemies with attack indicators
     for (world.enemies.items) |enemy| {
-        const color = switch (enemy.enemy_type) {
+        const base_color = switch (enemy.enemy_type) {
             .Melee => ray.RED,
             .Ranged => ray.GREEN,
             .Charger => ray.YELLOW,
         };
 
-        ray.DrawCircleV(enemy.position.toRaylib(), 15, color);
+        const enemy_color = if (enemy.attack_timer < 0.1) // Blink during attack
+            invertColor(base_color)
+        else
+            base_color;
+
+        ray.DrawCircleV(enemy.position.toRaylib(), 15, enemy_color);
+
+        // Draw enemy hit indicator
+        if (enemy.hit_timer > 0) {
+            const hit_pos = enemy.position.sub(.{ .x = 0, .y = 25 });
+            const hit_x = @as(i32, @intFromFloat(hit_pos.toRaylib().x - 5));
+            const hit_y = @as(i32, @intFromFloat(hit_pos.toRaylib().y - 10));
+            ray.DrawText("!", hit_x, hit_y, 20, ray.RED);
+        }
 
         // Draw health bar
         const health_percent = enemy.health / enemy.max_health;
@@ -857,9 +1024,15 @@ fn drawGame(game_state: *GameState) void {
         ray.DrawCircleV(proj.position.toRaylib(), 5, ray.WHITE);
     }
 
-    // Draw loot
+    // Draw loot with distinct colors
     for (world.loot.items) |loot| {
-        ray.DrawCircleV(loot.position.toRaylib(), 10, ray.GOLD);
+        const color = if (loot.experience > 0)
+            ray.PURPLE // Experience orbs
+        else if (loot.gold > 0)
+            ray.GOLD // Gold coins
+        else
+            ray.BLUE; // Energy crystals
+        ray.DrawCircleV(loot.position.toRaylib(), 10, color);
     }
 
     ray.EndMode2D();
@@ -871,6 +1044,55 @@ fn drawGame(game_state: *GameState) void {
     ray.DrawText(ray.TextFormat("Experience: %.1f", world.player.experience), 10, ui_y + 50, 20, ray.WHITE);
     ray.DrawText(ray.TextFormat("Gold: %d", world.player.gold), 10, ui_y + 75, 20, ray.WHITE);
     ray.DrawText(ray.TextFormat("Energy: %.1f", world.player.energy), 10, ui_y + 100, 20, ray.WHITE);
+
+    // Draw timer
+    const minutes = @as(i32, @intFromFloat(world.level_timer / 60.0));
+    const seconds = @as(i32, @intFromFloat(@mod(world.level_timer, 60.0)));
+    const timer_text = std.fmt.allocPrint(
+        std.heap.page_allocator,
+        "{:0>2}:{:0>2}",
+        .{ minutes, seconds },
+    ) catch return;
+    defer std.heap.page_allocator.free(timer_text);
+
+    const timer_font_size = 40;
+    const timer_width = ray.MeasureText(timer_text.ptr, timer_font_size);
+    const timer_x = @divTrunc(game_state.screen_width - timer_width, 2);
+    const timer_y = 20;
+
+    // Draw timer background
+    const padding = 10;
+    ray.DrawRectangle(
+        timer_x - padding,
+        timer_y - padding,
+        timer_width + (padding * 2),
+        timer_font_size + (padding * 2),
+        ray.ColorAlpha(ray.BLACK, 0.5),
+    );
+
+    // Draw timer text
+    ray.DrawText(timer_text.ptr, timer_x, timer_y, timer_font_size, ray.WHITE);
+
+    // Draw game over message if timer is running low
+    if (world.level_timer <= 30.0) {
+        const warning_text = "Time's running out!";
+        const warning_font_size = 30;
+        const warning_width = ray.MeasureText(warning_text.ptr, warning_font_size);
+        const warning_x = @divTrunc(game_state.screen_width - warning_width, 2);
+        const warning_y = timer_y + timer_font_size + padding;
+
+        // Draw warning background
+        ray.DrawRectangle(
+            warning_x - padding,
+            warning_y - padding,
+            warning_width + (padding * 2),
+            warning_font_size + (padding * 2),
+            ray.ColorAlpha(ray.RED, 0.5),
+        );
+
+        // Draw warning text
+        ray.DrawText(warning_text.ptr, warning_x, warning_y, warning_font_size, ray.WHITE);
+    }
 }
 
 fn drawHelpIcon(game_state: *GameState) void {
@@ -902,6 +1124,7 @@ fn drawHelpOverlay(game_state: *GameState) void {
         .Story => "Story Controls:\n\nPress SPACE or ENTER to continue\nPress ESC to skip to character selection\n\nPress ? or ESC to close help",
         .AvatarSelection => "Character Selection Controls:\n\nUse LEFT/RIGHT arrow keys to choose character\nPress SPACE or ENTER to confirm selection\nPress ESC to return to story\n\nPress ? or ESC to close help",
         .Playing => "Game Controls:\n\nPress ESC to return to menu\n\nPress ? or ESC to close help",
+        .GameOver => "Game Over:\n\nPress ENTER to return to menu\n\nPress ? or ESC to close help",
     };
 
     // Calculate text dimensions for the background box
@@ -999,6 +1222,7 @@ fn initGameWorld(allocator: std.mem.Allocator, character_type: CharacterType) !*
             .experience = 0,
             .gold = 0,
             .energy = 0,
+            .hit_timer = 0,
         },
         .Scout => Player{
             .position = .{ .x = 0, .y = 0 },
@@ -1015,6 +1239,7 @@ fn initGameWorld(allocator: std.mem.Allocator, character_type: CharacterType) !*
             .experience = 0,
             .gold = 0,
             .energy = 0,
+            .hit_timer = 0,
         },
         .Guardian => Player{
             .position = .{ .x = 0, .y = 0 },
@@ -1031,6 +1256,7 @@ fn initGameWorld(allocator: std.mem.Allocator, character_type: CharacterType) !*
             .experience = 0,
             .gold = 0,
             .energy = 0,
+            .hit_timer = 0,
         },
     };
 
@@ -1048,6 +1274,7 @@ fn initGameWorld(allocator: std.mem.Allocator, character_type: CharacterType) !*
             .rotation = 0,
             .zoom = 1,
         },
+        .level_timer = 600.0, // 10 minutes in seconds
     };
 
     return game_world;
