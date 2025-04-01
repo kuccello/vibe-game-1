@@ -95,50 +95,67 @@ pub fn build(b: *std.Build) void {
     raylib.linkFramework("CoreVideo");
 
     // Create the game executable
-    const game = b.addExecutable(.{
-        .name = "game1",
+    const exe = b.addExecutable(.{
+        .name = "AncientPowers",
         .root_source_file = .{ .cwd_relative = "src/main.zig" },
         .target = target,
         .optimize = optimize,
     });
 
     // Link with raylib and GLFW
-    game.addIncludePath(.{ .cwd_relative = "raylib/src" });
-    game.linkLibrary(raylib);
-    game.linkLibrary(glfw);
+    exe.addIncludePath(.{ .cwd_relative = "raylib/src" });
+    exe.linkLibrary(raylib);
+    exe.linkLibrary(glfw);
+    exe.linkSystemLibrary("c");
 
-    // Create the generate_assets executable
-    const generate_assets = b.addExecutable(.{
-        .name = "generate_assets",
-        .root_source_file = .{ .cwd_relative = "src/generate_assets.zig" },
+    // This declares intent for the executable to be installed into the standard location when the user invokes the "install" step
+    b.installArtifact(exe);
+
+    // Creates a step for unit testing.
+    const unit_tests = b.addTest(.{
+        .root_source_file = .{ .cwd_relative = "src/main.zig" },
         .target = target,
         .optimize = optimize,
     });
 
-    // Link raylib and GLFW for generate_assets
-    generate_assets.addIncludePath(.{ .cwd_relative = "raylib/src" });
-    generate_assets.linkLibrary(raylib);
-    generate_assets.linkLibrary(glfw);
-    generate_assets.linkFramework("CoreServices");
-
-    // Create the run command for generate_assets
-    const run_generate_assets = b.addRunArtifact(generate_assets);
-    run_generate_assets.step.dependOn(&generate_assets.step);
-    run_generate_assets.expectExitCode(0);
-
-    // Add the generate_assets step as a dependency for the game
-    game.step.dependOn(&run_generate_assets.step);
-
-    // Expose the generate_assets step
-    const generate_assets_step = b.step("generate_assets", "Generate game assets");
-    generate_assets_step.dependOn(&run_generate_assets.step);
-    b.default_step.dependOn(generate_assets_step);
-
-    // Create the run command for the game
-    const run_cmd = b.addRunArtifact(game);
+    // Creates a step for running the executable
+    const run_cmd = b.addRunArtifact(exe);
     run_cmd.step.dependOn(b.getInstallStep());
 
-    // Create the run step
-    const run_step = b.step("run", "Run the game");
+    // Creates a step for creating a release build
+    const release = b.addExecutable(.{
+        .name = "AncientPowers",
+        .root_source_file = .{ .cwd_relative = "src/main.zig" },
+        .target = target,
+        .optimize = .ReleaseFast,
+    });
+
+    // Link with raylib and GLFW for release build
+    release.addIncludePath(.{ .cwd_relative = "raylib/src" });
+    release.linkLibrary(raylib);
+    release.linkLibrary(glfw);
+    release.linkSystemLibrary("c");
+
+    // This declares intent for the release executable to be installed
+    b.installArtifact(release);
+
+    // Creates a step for creating a release build
+    const release_cmd = b.addRunArtifact(release);
+    release_cmd.step.dependOn(b.getInstallStep());
+
+    // Creates a step for unit testing.
+    const run_unit_tests_cmd = b.addRunArtifact(unit_tests);
+    if (b.args) |args| {
+        run_unit_tests_cmd.addArgs(args);
+    }
+    const test_step = b.step("test", "Run unit tests");
+    test_step.dependOn(&run_unit_tests_cmd.step);
+
+    // Creates a step for running the executable.
+    const run_step = b.step("run", "Run the executable");
     run_step.dependOn(&run_cmd.step);
+
+    // Creates a step for creating a release build.
+    const release_step = b.step("release", "Create a release build");
+    release_step.dependOn(&release.step);
 }
