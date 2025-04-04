@@ -162,6 +162,7 @@ const GameState = struct {
     game_world: ?*GameWorld,
     floor_tiles: [3]ray.Texture2D,
     font: ray.Font,
+    should_quit: bool,
 };
 
 fn cleanupGameState(game_state: *GameState) void {
@@ -229,7 +230,7 @@ pub fn main() !void {
     // Start title music
     ray.PlayMusicStream(game_state.title_music);
 
-    while (!ray.WindowShouldClose()) {
+    while (!ray.WindowShouldClose() and !game_state.should_quit) {
         updateHelp(&game_state);
 
         // Update music based on current state
@@ -366,6 +367,7 @@ fn initGameState() GameState {
         .game_world = null,
         .floor_tiles = floor_tiles,
         .font = font,
+        .should_quit = false,
     };
 }
 
@@ -392,7 +394,7 @@ fn updateMenu(game_state: *GameState) void {
                 ray.PlayMusicStream(game_state.story_music);
             },
             .Quit => {
-                ray.CloseWindow();
+                game_state.should_quit = true;
             },
         }
     }
