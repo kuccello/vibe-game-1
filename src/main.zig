@@ -1226,14 +1226,20 @@ fn drawGame(game_state: *GameState) void {
         const flip_horizontal = world.player.is_facing_left;
         const sprite_width = if (flip_horizontal) -@as(f32, @floatFromInt(frame_width)) else @as(f32, @floatFromInt(frame_width));
 
-        // Draw the sprite with the current animation frame
+        // Calculate rotation angle based on velocity
+        const player_angle = std.math.atan2(world.player.velocity.y, world.player.velocity.x) * (180.0 / std.math.pi);
+
+        // Calculate the center point for rotation
+        const player_origin = ray.Vector2{ .x = @as(f32, @floatFromInt(frame_width)) / 2, .y = @as(f32, @floatFromInt(frame_height)) / 2 };
+
+        // Draw the sprite with the current animation frame and rotation
         const modified_source_rect = ray.Rectangle{
             .x = source_rect.x,
             .y = source_rect.y,
             .width = sprite_width,
             .height = source_rect.height,
         };
-        ray.DrawTexturePro(sprite_texture, modified_source_rect, dest_rect, .{ .x = 0, .y = 0 }, 0, ray.WHITE);
+        ray.DrawTexturePro(sprite_texture, modified_source_rect, dest_rect, player_origin, player_angle, ray.WHITE);
 
         // Draw player hit indicator
         if (world.player.hit_timer > 0) {
@@ -1290,14 +1296,20 @@ fn drawGame(game_state: *GameState) void {
         const flip_horizontal = enemy.is_facing_left;
         const sprite_width = if (flip_horizontal) -@as(f32, @floatFromInt(frame_width)) else @as(f32, @floatFromInt(frame_width));
 
-        // Draw the sprite with the current animation frame
+        // Calculate rotation angle based on velocity
+        const enemy_angle = std.math.atan2(enemy.velocity.y, enemy.velocity.x) * (180.0 / std.math.pi);
+
+        // Calculate the center point for rotation
+        const enemy_origin = ray.Vector2{ .x = @as(f32, @floatFromInt(frame_width)) / 2, .y = @as(f32, @floatFromInt(frame_height)) / 2 };
+
+        // Draw the sprite with the current animation frame and rotation
         const modified_source_rect = ray.Rectangle{
             .x = source_rect.x,
             .y = source_rect.y,
             .width = sprite_width,
             .height = source_rect.height,
         };
-        ray.DrawTexturePro(sprite_texture, modified_source_rect, dest_rect, .{ .x = 0, .y = 0 }, 0, ray.WHITE);
+        ray.DrawTexturePro(sprite_texture, modified_source_rect, dest_rect, enemy_origin, enemy_angle, ray.WHITE);
 
         // Draw enemy hit indicator
         if (enemy.hit_timer > 0) {
