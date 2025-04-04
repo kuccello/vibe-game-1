@@ -78,6 +78,16 @@ const Player = struct {
     gold: i32,
     energy: f32,
     hit_timer: f32,
+    // Animation fields
+    sprite_state: enum {
+        Idle,
+        Running,
+        Attacking,
+    } = .Idle,
+    animation_frame: i32 = 0,
+    animation_timer: f32 = 0,
+    animation_speed: f32 = 0.15, // Time in seconds per frame
+    is_facing_left: bool = false,
 };
 
 const EnemyType = enum {
@@ -100,6 +110,16 @@ const Enemy = struct {
     charge_energy: f32,
     is_charging: bool,
     hit_timer: f32,
+    // Animation fields
+    sprite_state: enum {
+        Idle,
+        Running,
+        Attacking,
+    } = .Idle,
+    animation_frame: i32 = 0,
+    animation_timer: f32 = 0,
+    animation_speed: f32 = 0.15, // Time in seconds per frame
+    is_facing_left: bool = false,
 };
 
 const Projectile = struct {
@@ -163,6 +183,47 @@ const GameState = struct {
     floor_tiles: [3]ray.Texture2D,
     font: ray.Font,
     should_quit: bool,
+    // Sprite sheets
+    player_sprites: struct {
+        warrior: struct {
+            idle: ray.Texture2D,
+            run: ray.Texture2D,
+            attack: ray.Texture2D,
+        },
+        scout: struct {
+            idle: ray.Texture2D,
+            run: ray.Texture2D,
+            attack: ray.Texture2D,
+        },
+        guardian: struct {
+            idle: ray.Texture2D,
+            run: ray.Texture2D,
+            attack: ray.Texture2D,
+        },
+    },
+    enemy_sprites: struct {
+        melee: struct {
+            idle: ray.Texture2D,
+            run: ray.Texture2D,
+            attack: ray.Texture2D,
+        },
+        ranged: struct {
+            idle: ray.Texture2D,
+            run: ray.Texture2D,
+            attack: ray.Texture2D,
+        },
+        charger: struct {
+            idle: ray.Texture2D,
+            run: ray.Texture2D,
+            attack: ray.Texture2D,
+        },
+    },
+    projectile_sprite: ray.Texture2D,
+    loot_sprites: struct {
+        experience: ray.Texture2D,
+        gold: ray.Texture2D,
+        energy: ray.Texture2D,
+    },
 };
 
 fn cleanupGameState(game_state: *GameState) void {
@@ -194,6 +255,34 @@ fn cleanupGameState(game_state: *GameState) void {
 
     // Unload title background
     ray.UnloadTexture(game_state.title_background);
+
+    // Unload player sprites
+    ray.UnloadTexture(game_state.player_sprites.warrior.idle);
+    ray.UnloadTexture(game_state.player_sprites.warrior.run);
+    ray.UnloadTexture(game_state.player_sprites.warrior.attack);
+    ray.UnloadTexture(game_state.player_sprites.scout.idle);
+    ray.UnloadTexture(game_state.player_sprites.scout.run);
+    ray.UnloadTexture(game_state.player_sprites.scout.attack);
+    ray.UnloadTexture(game_state.player_sprites.guardian.idle);
+    ray.UnloadTexture(game_state.player_sprites.guardian.run);
+    ray.UnloadTexture(game_state.player_sprites.guardian.attack);
+
+    // Unload enemy sprites
+    ray.UnloadTexture(game_state.enemy_sprites.melee.idle);
+    ray.UnloadTexture(game_state.enemy_sprites.melee.run);
+    ray.UnloadTexture(game_state.enemy_sprites.melee.attack);
+    ray.UnloadTexture(game_state.enemy_sprites.ranged.idle);
+    ray.UnloadTexture(game_state.enemy_sprites.ranged.run);
+    ray.UnloadTexture(game_state.enemy_sprites.ranged.attack);
+    ray.UnloadTexture(game_state.enemy_sprites.charger.idle);
+    ray.UnloadTexture(game_state.enemy_sprites.charger.run);
+    ray.UnloadTexture(game_state.enemy_sprites.charger.attack);
+
+    // Unload projectile and loot sprites
+    ray.UnloadTexture(game_state.projectile_sprite);
+    ray.UnloadTexture(game_state.loot_sprites.experience);
+    ray.UnloadTexture(game_state.loot_sprites.gold);
+    ray.UnloadTexture(game_state.loot_sprites.energy);
 }
 
 pub fn main() !void {
@@ -368,6 +457,47 @@ fn initGameState() GameState {
         .floor_tiles = floor_tiles,
         .font = font,
         .should_quit = false,
+        // Sprite sheets
+        .player_sprites = .{
+            .warrior = .{
+                .idle = ray.LoadTexture("assets/sprites/player_warrior_idle.png"),
+                .run = ray.LoadTexture("assets/sprites/player_warrior_run.png"),
+                .attack = ray.LoadTexture("assets/sprites/player_warrior_attack.png"),
+            },
+            .scout = .{
+                .idle = ray.LoadTexture("assets/sprites/player_scout_idle.png"),
+                .run = ray.LoadTexture("assets/sprites/player_scout_run.png"),
+                .attack = ray.LoadTexture("assets/sprites/player_scout_attack.png"),
+            },
+            .guardian = .{
+                .idle = ray.LoadTexture("assets/sprites/player_guardian_idle.png"),
+                .run = ray.LoadTexture("assets/sprites/player_guardian_run.png"),
+                .attack = ray.LoadTexture("assets/sprites/player_guardian_attack.png"),
+            },
+        },
+        .enemy_sprites = .{
+            .melee = .{
+                .idle = ray.LoadTexture("assets/sprites/enemy_melee_idle.png"),
+                .run = ray.LoadTexture("assets/sprites/enemy_melee_run.png"),
+                .attack = ray.LoadTexture("assets/sprites/enemy_melee_attack.png"),
+            },
+            .ranged = .{
+                .idle = ray.LoadTexture("assets/sprites/enemy_ranged_idle.png"),
+                .run = ray.LoadTexture("assets/sprites/enemy_ranged_run.png"),
+                .attack = ray.LoadTexture("assets/sprites/enemy_ranged_attack.png"),
+            },
+            .charger = .{
+                .idle = ray.LoadTexture("assets/sprites/enemy_charger_idle.png"),
+                .run = ray.LoadTexture("assets/sprites/enemy_charger_run.png"),
+                .attack = ray.LoadTexture("assets/sprites/enemy_charger_attack.png"),
+            },
+        },
+        .projectile_sprite = ray.LoadTexture("assets/sprites/projectile.png"),
+        .loot_sprites = .{
+            .experience = ray.LoadTexture("assets/sprites/loot_experience.png"),
+            .gold = ray.LoadTexture("assets/sprites/loot_gold.png"),
+            .energy = ray.LoadTexture("assets/sprites/loot_energy.png"),
+        },
     };
 }
 
@@ -639,8 +769,25 @@ fn updateGame(game_state: *GameState) void {
         move_dir = move_dir.normalize();
         world.player.velocity = move_dir.scale(move_speed);
         world.player.direction = move_dir;
+
+        // Update facing direction for sprites
+        if (move_dir.x < 0) {
+            world.player.is_facing_left = true;
+        } else if (move_dir.x > 0) {
+            world.player.is_facing_left = false;
+        }
+
+        // Set to running state if not attacking
+        if (world.player.sprite_state != .Attacking) {
+            world.player.sprite_state = .Running;
+        }
     } else {
         world.player.velocity = .{ .x = 0, .y = 0 };
+
+        // Set to idle state if not attacking
+        if (world.player.sprite_state != .Attacking) {
+            world.player.sprite_state = .Idle;
+        }
     }
 
     // Update player position
@@ -654,6 +801,11 @@ fn updateGame(game_state: *GameState) void {
     world.player.attack_timer -= delta_time;
     if (world.player.attack_timer <= 0) {
         world.player.attack_timer = 1.0 / world.player.attack_speed;
+
+        // Set to attacking sprite state
+        world.player.sprite_state = .Attacking;
+        world.player.animation_frame = 0; // Reset animation frame for attack
+        world.player.animation_timer = 0; // Reset animation timer for attack
 
         // Perform attack based on character type
         switch (world.player.character_type) {
@@ -708,6 +860,18 @@ fn updateGame(game_state: *GameState) void {
                 }
             },
         }
+    } else if (world.player.sprite_state == .Attacking) {
+        // Return to idle or running after attack animation completes (4 frames)
+        if (world.player.animation_frame >= 3) {
+            world.player.sprite_state = if (world.player.velocity.length() > 0) .Running else .Idle;
+        }
+    }
+
+    // Update player animation timer and frame
+    world.player.animation_timer += delta_time;
+    if (world.player.animation_timer >= world.player.animation_speed) {
+        world.player.animation_timer = 0;
+        world.player.animation_frame = @mod(world.player.animation_frame + 1, 4); // 4 frames per animation
     }
 
     // Update projectiles
@@ -751,10 +915,38 @@ fn updateGame(game_state: *GameState) void {
         enemy.velocity = dir_to_player.scale(50.0);
         enemy.position = enemy.position.add(enemy.velocity.scale(delta_time));
 
+        // Update enemy facing direction
+        if (dir_to_player.x < 0) {
+            enemy.is_facing_left = true;
+        } else {
+            enemy.is_facing_left = false;
+        }
+
+        // Update enemy sprite state
+        if (enemy.velocity.length() > 0) {
+            if (enemy.sprite_state != .Attacking) {
+                enemy.sprite_state = .Running;
+            }
+        } else if (enemy.sprite_state != .Attacking) {
+            enemy.sprite_state = .Idle;
+        }
+
+        // Update enemy animation timer and frame
+        enemy.animation_timer += delta_time;
+        if (enemy.animation_timer >= enemy.animation_speed) {
+            enemy.animation_timer = 0;
+            enemy.animation_frame = @mod(enemy.animation_frame + 1, 4); // 4 frames per animation
+        }
+
         // Update enemy attack
         enemy.attack_timer -= delta_time;
         if (enemy.attack_timer <= 0) {
             enemy.attack_timer = 1.0 / enemy.attack_speed;
+
+            // Set to attacking sprite state
+            enemy.sprite_state = .Attacking;
+            enemy.animation_frame = 0; // Reset animation frame for attack
+            enemy.animation_timer = 0; // Reset animation timer for attack
 
             switch (enemy.enemy_type) {
                 .Melee => {
@@ -791,6 +983,11 @@ fn updateGame(game_state: *GameState) void {
                         }
                     }
                 },
+            }
+        } else if (enemy.sprite_state == .Attacking) {
+            // Return to idle or running after attack animation completes
+            if (enemy.animation_frame >= 3) {
+                enemy.sprite_state = if (enemy.velocity.length() > 0) .Running else .Idle;
             }
         }
 
@@ -849,6 +1046,11 @@ fn updateGame(game_state: *GameState) void {
                 .charge_energy = 0,
                 .is_charging = false,
                 .hit_timer = 0,
+                .sprite_state = .Idle,
+                .animation_frame = 0,
+                .animation_timer = 0,
+                .animation_speed = 0.15,
+                .is_facing_left = false,
             },
             .Ranged => Enemy{
                 .position = spawn_pos,
@@ -864,6 +1066,11 @@ fn updateGame(game_state: *GameState) void {
                 .charge_energy = 0,
                 .is_charging = false,
                 .hit_timer = 0,
+                .sprite_state = .Idle,
+                .animation_frame = 0,
+                .animation_timer = 0,
+                .animation_speed = 0.15,
+                .is_facing_left = false,
             },
             .Charger => Enemy{
                 .position = spawn_pos,
@@ -879,6 +1086,11 @@ fn updateGame(game_state: *GameState) void {
                 .charge_energy = 0,
                 .is_charging = false,
                 .hit_timer = 0,
+                .sprite_state = .Idle,
+                .animation_frame = 0,
+                .animation_timer = 0,
+                .animation_speed = 0.15,
+                .is_facing_left = false,
             },
         };
 
@@ -968,39 +1180,124 @@ fn drawGame(game_state: *GameState) void {
         }
     }
 
-    // Draw player with attack indicator
-    const player_color = if (world.player.attack_timer < 0.1) // Blink during attack
-        invertColor(ray.BLUE)
-    else
-        ray.BLUE;
-    ray.DrawCircleV(world.player.position.toRaylib(), 20, player_color);
-
-    // Draw player hit indicator
-    if (world.player.hit_timer > 0) {
-        const hit_pos = world.player.position.sub(.{ .x = 0, .y = 30 });
-        const hit_x = @as(i32, @intFromFloat(hit_pos.toRaylib().x - 5));
-        const hit_y = @as(i32, @intFromFloat(hit_pos.toRaylib().y - 10));
-        ray.DrawText("!", hit_x, hit_y, 20, ray.RED);
-    }
-
-    // Draw player direction indicator
-    const dir_indicator = world.player.position.add(world.player.direction.scale(30));
-    ray.DrawLineV(world.player.position.toRaylib(), dir_indicator.toRaylib(), ray.WHITE);
-
-    // Draw enemies with attack indicators
-    for (world.enemies.items) |enemy| {
-        const base_color = switch (enemy.enemy_type) {
-            .Melee => ray.RED,
-            .Ranged => ray.GREEN,
-            .Charger => ray.YELLOW,
+    // Draw player with appropriate sprite
+    {
+        // Select the appropriate sprite texture based on player state and character type
+        const sprite_texture = switch (world.player.character_type) {
+            .Warrior => switch (world.player.sprite_state) {
+                .Idle => game_state.player_sprites.warrior.idle,
+                .Running => game_state.player_sprites.warrior.run,
+                .Attacking => game_state.player_sprites.warrior.attack,
+            },
+            .Scout => switch (world.player.sprite_state) {
+                .Idle => game_state.player_sprites.scout.idle,
+                .Running => game_state.player_sprites.scout.run,
+                .Attacking => game_state.player_sprites.scout.attack,
+            },
+            .Guardian => switch (world.player.sprite_state) {
+                .Idle => game_state.player_sprites.guardian.idle,
+                .Running => game_state.player_sprites.guardian.run,
+                .Attacking => game_state.player_sprites.guardian.attack,
+            },
         };
 
-        const enemy_color = if (enemy.attack_timer < 0.1) // Blink during attack
-            invertColor(base_color)
-        else
-            base_color;
+        // Calculate frame width based on the sprite sheet width divided by 4 (frames per animation)
+        const frame_width = @divTrunc(sprite_texture.width, 4);
+        const frame_height = sprite_texture.height;
 
-        ray.DrawCircleV(enemy.position.toRaylib(), 15, enemy_color);
+        // Calculate source rectangle for current animation frame
+        const source_rect = ray.Rectangle{
+            .x = @as(f32, @floatFromInt(world.player.animation_frame * frame_width)),
+            .y = 0,
+            .width = @as(f32, @floatFromInt(frame_width)),
+            .height = @as(f32, @floatFromInt(frame_height)),
+        };
+
+        // Calculate destination rectangle
+        const sprite_size = 64; // The size to render the sprite
+        const dest_rect = ray.Rectangle{
+            .x = world.player.position.x - @as(f32, @floatFromInt(sprite_size)) / 2.0,
+            .y = world.player.position.y - @as(f32, @floatFromInt(sprite_size)) / 2.0,
+            .width = @as(f32, @floatFromInt(sprite_size)),
+            .height = @as(f32, @floatFromInt(sprite_size)),
+        };
+
+        // Determine whether to flip the sprite horizontally
+        const flip_horizontal = world.player.is_facing_left;
+        const sprite_width = if (flip_horizontal) -@as(f32, @floatFromInt(frame_width)) else @as(f32, @floatFromInt(frame_width));
+
+        // Draw the sprite with the current animation frame
+        const modified_source_rect = ray.Rectangle{
+            .x = source_rect.x,
+            .y = source_rect.y,
+            .width = sprite_width,
+            .height = source_rect.height,
+        };
+        ray.DrawTexturePro(sprite_texture, modified_source_rect, dest_rect, .{ .x = 0, .y = 0 }, 0, ray.WHITE);
+
+        // Draw player hit indicator
+        if (world.player.hit_timer > 0) {
+            const hit_pos = world.player.position.sub(.{ .x = 0, .y = 30 });
+            const hit_x = @as(i32, @intFromFloat(hit_pos.toRaylib().x - 5));
+            const hit_y = @as(i32, @intFromFloat(hit_pos.toRaylib().y - 10));
+            ray.DrawText("!", hit_x, hit_y, 20, ray.RED);
+        }
+    }
+
+    // Draw enemies with appropriate sprites
+    for (world.enemies.items) |enemy| {
+        // Select the appropriate sprite texture based on enemy state and type
+        const sprite_texture = switch (enemy.enemy_type) {
+            .Melee => switch (enemy.sprite_state) {
+                .Idle => game_state.enemy_sprites.melee.idle,
+                .Running => game_state.enemy_sprites.melee.run,
+                .Attacking => game_state.enemy_sprites.melee.attack,
+            },
+            .Ranged => switch (enemy.sprite_state) {
+                .Idle => game_state.enemy_sprites.ranged.idle,
+                .Running => game_state.enemy_sprites.ranged.run,
+                .Attacking => game_state.enemy_sprites.ranged.attack,
+            },
+            .Charger => switch (enemy.sprite_state) {
+                .Idle => game_state.enemy_sprites.charger.idle,
+                .Running => game_state.enemy_sprites.charger.run,
+                .Attacking => game_state.enemy_sprites.charger.attack,
+            },
+        };
+
+        // Calculate frame width based on the sprite sheet width divided by 4 (frames per animation)
+        const frame_width = @divTrunc(sprite_texture.width, 4);
+        const frame_height = sprite_texture.height;
+
+        // Calculate source rectangle for current animation frame
+        const source_rect = ray.Rectangle{
+            .x = @as(f32, @floatFromInt(enemy.animation_frame * frame_width)),
+            .y = 0,
+            .width = @as(f32, @floatFromInt(frame_width)),
+            .height = @as(f32, @floatFromInt(frame_height)),
+        };
+
+        // Calculate destination rectangle
+        const sprite_size = 64; // The size to render the sprite
+        const dest_rect = ray.Rectangle{
+            .x = enemy.position.x - @as(f32, @floatFromInt(sprite_size)) / 2.0,
+            .y = enemy.position.y - @as(f32, @floatFromInt(sprite_size)) / 2.0,
+            .width = @as(f32, @floatFromInt(sprite_size)),
+            .height = @as(f32, @floatFromInt(sprite_size)),
+        };
+
+        // Determine whether to flip the sprite horizontally
+        const flip_horizontal = enemy.is_facing_left;
+        const sprite_width = if (flip_horizontal) -@as(f32, @floatFromInt(frame_width)) else @as(f32, @floatFromInt(frame_width));
+
+        // Draw the sprite with the current animation frame
+        const modified_source_rect = ray.Rectangle{
+            .x = source_rect.x,
+            .y = source_rect.y,
+            .width = sprite_width,
+            .height = source_rect.height,
+        };
+        ray.DrawTexturePro(sprite_texture, modified_source_rect, dest_rect, .{ .x = 0, .y = 0 }, 0, ray.WHITE);
 
         // Draw enemy hit indicator
         if (enemy.hit_timer > 0) {
@@ -1023,18 +1320,84 @@ fn drawGame(game_state: *GameState) void {
 
     // Draw projectiles
     for (world.projectiles.items) |proj| {
-        ray.DrawCircleV(proj.position.toRaylib(), 5, ray.WHITE);
+        // Calculate animation frame (cycling through frames)
+        const frame_time = @as(f32, @floatCast(ray.GetTime()));
+        const animation_frame = @as(i32, @intFromFloat(@mod(frame_time * 5.0, 4.0)));
+
+        // Calculate frame width based on the sprite sheet width divided by 4 (frames per animation)
+        const frame_width = @divTrunc(game_state.projectile_sprite.width, 4);
+        const frame_height = game_state.projectile_sprite.height;
+
+        // Calculate source rectangle for current animation frame
+        const source_rect = ray.Rectangle{
+            .x = @as(f32, @floatFromInt(animation_frame * frame_width)),
+            .y = 0,
+            .width = @as(f32, @floatFromInt(frame_width)),
+            .height = @as(f32, @floatFromInt(frame_height)),
+        };
+
+        // Calculate destination rectangle
+        const sprite_size = 32; // The size to render the sprite
+        const dest_rect = ray.Rectangle{
+            .x = proj.position.x - @as(f32, @floatFromInt(sprite_size)) / 2.0,
+            .y = proj.position.y - @as(f32, @floatFromInt(sprite_size)) / 2.0,
+            .width = @as(f32, @floatFromInt(sprite_size)),
+            .height = @as(f32, @floatFromInt(sprite_size)),
+        };
+
+        // Draw the projectile sprite
+        const modified_source_rect = ray.Rectangle{
+            .x = source_rect.x,
+            .y = source_rect.y,
+            .width = source_rect.width,
+            .height = source_rect.height,
+        };
+        ray.DrawTexturePro(game_state.projectile_sprite, modified_source_rect, dest_rect, .{ .x = 0, .y = 0 }, 0, ray.WHITE);
     }
 
-    // Draw loot with distinct colors
+    // Draw loot with distinct sprites
     for (world.loot.items) |loot| {
-        const color = if (loot.experience > 0)
-            ray.PURPLE // Experience orbs
+        // Calculate animation frame (cycling through frames based on time)
+        const frame_time = @as(f32, @floatCast(ray.GetTime()));
+        const animation_frame = @as(i32, @intFromFloat(@mod(frame_time * 5.0, 4.0)));
+
+        // Select the appropriate sprite texture based on loot type
+        const sprite_texture = if (loot.experience > 0)
+            game_state.loot_sprites.experience // Experience orbs
         else if (loot.gold > 0)
-            ray.GOLD // Gold coins
+            game_state.loot_sprites.gold // Gold coins
         else
-            ray.BLUE; // Energy crystals
-        ray.DrawCircleV(loot.position.toRaylib(), 10, color);
+            game_state.loot_sprites.energy; // Energy crystals
+
+        // Calculate frame width based on the sprite sheet width divided by 4 (frames per animation)
+        const frame_width = @divTrunc(sprite_texture.width, 4);
+        const frame_height = sprite_texture.height;
+
+        // Calculate source rectangle for current animation frame
+        const source_rect = ray.Rectangle{
+            .x = @as(f32, @floatFromInt(animation_frame * frame_width)),
+            .y = 0,
+            .width = @as(f32, @floatFromInt(frame_width)),
+            .height = @as(f32, @floatFromInt(frame_height)),
+        };
+
+        // Calculate destination rectangle
+        const sprite_size = 32; // The size to render the sprite
+        const dest_rect = ray.Rectangle{
+            .x = loot.position.x - @as(f32, @floatFromInt(sprite_size)) / 2.0,
+            .y = loot.position.y - @as(f32, @floatFromInt(sprite_size)) / 2.0,
+            .width = @as(f32, @floatFromInt(sprite_size)),
+            .height = @as(f32, @floatFromInt(sprite_size)),
+        };
+
+        // Draw the loot sprite
+        const modified_source_rect = ray.Rectangle{
+            .x = source_rect.x,
+            .y = source_rect.y,
+            .width = source_rect.width,
+            .height = source_rect.height,
+        };
+        ray.DrawTexturePro(sprite_texture, modified_source_rect, dest_rect, .{ .x = 0, .y = 0 }, 0, ray.WHITE);
     }
 
     ray.EndMode2D();

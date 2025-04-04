@@ -158,4 +158,25 @@ pub fn build(b: *std.Build) void {
     // Creates a step for creating a release build.
     const release_step = b.step("release", "Create a release build");
     release_step.dependOn(&release.step);
+
+    // Create the sprite generator executable
+    const sprite_gen = b.addExecutable(.{
+        .name = "SpriteGenerator",
+        .root_source_file = .{ .cwd_relative = "src/sprite_generator.zig" },
+        .target = target,
+        .optimize = optimize,
+    });
+
+    // Link with raylib and GLFW for sprite generator
+    sprite_gen.addIncludePath(.{ .cwd_relative = "raylib/src" });
+    sprite_gen.linkLibrary(raylib);
+    sprite_gen.linkLibrary(glfw);
+    sprite_gen.linkSystemLibrary("c");
+
+    // Creates a step for running the sprite generator
+    const run_sprite_gen = b.addRunArtifact(sprite_gen);
+
+    // Creates a step for generating sprites
+    const gen_sprites_step = b.step("gen-sprites", "Generate placeholder sprites");
+    gen_sprites_step.dependOn(&run_sprite_gen.step);
 }
